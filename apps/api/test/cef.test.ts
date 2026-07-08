@@ -115,6 +115,17 @@ describe("buildCefMessage", () => {
     expect(message).toContain("cat=http_requests");
   });
 
+  it("emits `rt` exactly once, even though it is auto-populated separately from the mapping rules", () => {
+    const message = buildCefMessage({
+      dataset: "http_requests",
+      record: { EdgeStartTimestamp: 1_720_000_000_000_000_000, ClientIP: "203.0.113.1" },
+      rules: DEFAULT_MAPPING_RULES.http_requests ?? [],
+      syslogHostname: "cloudflare",
+    });
+    const rtOccurrences = message.match(/\brt=/g) ?? [];
+    expect(rtOccurrences).toHaveLength(1);
+  });
+
   it("omits extension keys whose source field is missing", () => {
     const message = buildCefMessage({
       dataset: "http_requests",

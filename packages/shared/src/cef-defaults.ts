@@ -15,13 +15,16 @@ export const DATASET_LABELS: Record<string, string> = {
 /**
  * Generic, vendor-agnostic CEF field mappings. These use only the
  * standard CEF extension dictionary (src, spt, dhost, request, act, cs1-6,
- * cn1-3, externalId, deviceExternalId, rt) so that any CEF-aware SIEM
+ * cn1-3, externalId, deviceExternalId) so that any CEF-aware SIEM
  * (NetWitness, Splunk, QRadar, Microsoft Sentinel, ArcSight, Elastic, etc.)
  * can parse the output without vendor-specific configuration.
+ *
+ * NOTE: `rt` (event time) and `cat` (dataset) are populated automatically
+ * by buildCefMessage() from well-known timestamp fields — do not add an
+ * explicit `rt` rule here or it will be emitted twice.
  */
 export const DEFAULT_MAPPING_RULES: Record<string, MappingRule[]> = {
   http_requests: [
-    { cefKey: "rt", sourceField: "EdgeStartTimestamp" },
     { cefKey: "src", sourceField: "ClientIP" },
     { cefKey: "spt", sourceField: "ClientSrcPort" },
     { cefKey: "dhost", sourceField: "ClientRequestHost" },
@@ -42,7 +45,6 @@ export const DEFAULT_MAPPING_RULES: Record<string, MappingRule[]> = {
     { cefKey: "deviceExternalId", sourceField: "WAFRuleID" },
   ],
   firewall_events: [
-    { cefKey: "rt", sourceField: "Datetime" },
     { cefKey: "src", sourceField: "ClientIP" },
     { cefKey: "dhost", sourceField: "ClientRequestHost" },
     { cefKey: "request", sourceField: "ClientRequestPath" },

@@ -124,25 +124,30 @@ adminRoute.get("/admin/status", async (c) => {
 
 // ---- Test send ----
 
-const SAMPLE_HTTP_REQUEST_RECORD = {
-  RayID: "test0000000000000000",
-  EdgeStartTimestamp: Date.now() * 1_000_000,
-  ClientIP: "203.0.113.1",
-  ClientCountry: "TH",
-  ClientSrcPort: 54321,
-  ClientRequestMethod: "GET",
-  ClientRequestHost: "example.com",
-  ClientRequestURI: "/api/v1/data",
-  ClientRequestProtocol: "HTTP/2",
-  ClientRequestUserAgent: "Mozilla/5.0 (logpush-syslog-hub test-send)",
-  ClientSSLProtocol: "TLSv1.3",
-  EdgeResponseStatus: 200,
-  EdgeResponseBytes: 4096,
-  EdgeColoCode: "SIN",
-  EdgeTimeToFirstByteMs: 18,
-  CacheCacheStatus: "MISS",
-  ZoneName: "example.com",
-};
+// Built fresh per-request (not at module scope) because Date.now() and
+// crypto.randomUUID() outside a request context return fixed/deterministic
+// values in the Workers runtime.
+function buildSampleHttpRequestRecord() {
+  return {
+    RayID: crypto.randomUUID().replace(/-/g, "").slice(0, 16),
+    EdgeStartTimestamp: Date.now() * 1_000_000,
+    ClientIP: "203.0.113.1",
+    ClientCountry: "TH",
+    ClientSrcPort: 54321,
+    ClientRequestMethod: "GET",
+    ClientRequestHost: "example.com",
+    ClientRequestURI: "/api/v1/data",
+    ClientRequestProtocol: "HTTP/2",
+    ClientRequestUserAgent: "Mozilla/5.0 (logpush-syslog-hub test-send)",
+    ClientSSLProtocol: "TLSv1.3",
+    EdgeResponseStatus: 200,
+    EdgeResponseBytes: 4096,
+    EdgeColoCode: "SIN",
+    EdgeTimeToFirstByteMs: 18,
+    CacheCacheStatus: "MISS",
+    ZoneName: "example.com",
+  };
+}
 
 adminRoute.post("/admin/test-send", async (c) => {
   const body = await c.req.json().catch(() => null);
@@ -154,7 +159,7 @@ adminRoute.post("/admin/test-send", async (c) => {
   const destination = await getDestination(c.env.DB, parsed.data.destinationId);
   if (!destination) return c.json({ error: "Destination not found" }, 404);
 
-  const record = parsed.data.record ?? SAMPLE_HTTP_REQUEST_RECORD;
+  const record = parsed.data.record ?? buildSampleHttpRequestRecord();
   const mapping = destination.mappingId ? await getMapping(c.env.DB, destination.mappingId) : null;
   const rules = mapping?.rules ?? GENERIC_FALLBACK_RULES;
 
