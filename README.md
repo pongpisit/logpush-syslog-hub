@@ -20,6 +20,20 @@ standard CEF syslog. No custom parser required on the receiving end.
 **Current scope:** TCP delivery only (plaintext), no TLS yet, no UDP — see
 [Roadmap](#roadmap).
 
+---
+
+## Contents
+
+- [How it works](#how-it-works)
+- [Part 1 — Deploy your own instance](#part-1--deploy-your-own-instance) *(one-time setup)*
+- [Part 2 — How to use it](#part-2--how-to-use-it) *(day-to-day)*
+- [Connecting to your syslog server](#connecting-to-your-syslog-server)
+- [Local development](#local-development)
+- [Troubleshooting](#troubleshooting)
+- [Roadmap](#roadmap)
+
+---
+
 ## How it works
 
 ```
@@ -54,7 +68,7 @@ the `http_requests` and `firewall_events` Logpush datasets, using only
 standard CEF keys, so the output is useful out of the box. You can add
 mappings for any other Logpush dataset from the web UI.
 
-## Monorepo layout
+### Monorepo layout
 
 ```
 apps/api/         Hono Worker: ingest endpoint, admin API, queue consumer, D1 schema
@@ -62,9 +76,23 @@ apps/web/         React + Vite + Tailwind admin UI (destinations, mappings, dash
 packages/shared/  Zod schemas + default CEF mappings shared by api and web
 ```
 
-## Quickstart
+---
 
-Requires Node.js 22+, pnpm 8+, and a Cloudflare account.
+## Part 1 — Deploy your own instance
+
+This is a **one-time setup** you (or whoever runs the infrastructure) do
+once. If someone has already deployed this for you, skip straight to
+[Part 2 — How to use it](#part-2--how-to-use-it).
+
+**You will need:**
+
+- Node.js **22+** and pnpm **8+** installed
+- A Cloudflare account, and `wrangler` logged in (`npx wrangler login`)
+- A Cloudflare API token with `Logs Write` permission for the zone(s) you
+  want to forward — [create one here](https://dash.cloudflare.com/profile/api-tokens)
+- Your Cloudflare **Zone ID** — found on your domain's dashboard **Overview** page
+
+### Step 1 — Clone and install
 
 ```bash
 git clone https://github.com/<you>/logpush-syslog-hub
@@ -72,7 +100,7 @@ cd logpush-syslog-hub
 pnpm install
 ```
 
-### 1. Create your Cloudflare resources
+### Step 2 — Create the Cloudflare resources
 
 ```bash
 cd apps/api
@@ -81,49 +109,106 @@ npx wrangler queues create logpush-syslog-queue
 npx wrangler queues create logpush-syslog-queue-dlq
 ```
 
-Paste the `database_id` printed above into `apps/api/wrangler.jsonc` →
-`d1_databases[0].database_id`.
+The first command prints a `database_id`. Copy it into
+`apps/api/wrangler.jsonc` under `d1_databases[0].database_id`, replacing the
+placeholder value.
 
-### 2. Set two secrets
+### Step 3 — Set two secrets
 
 ```bash
-npx wrangler secret put INGEST_SECRET   # authenticates Logpush -> Worker
-npx wrangler secret put ADMIN_SECRET    # authenticates the web UI / admin API
+npx wrangler secret put INGEST_SECRET   # Logpush uses this to authenticate to the Worker
+npx wrangler secret put ADMIN_SECRET    # the web UI uses this to authenticate to the Worker
 ```
 
-Generate strong values with `openssl rand -hex 32`. For local development,
-copy `apps/api/.dev.vars.example` to `apps/api/.dev.vars` and fill in test
-values (this file is git-ignored).
+Wrangler will prompt you for each value — generate strong random values with:
 
-### 3. Apply the database schema
+```bash
+openssl rand -hex 32
+```
+
+Save both values somewhere safe (e.g. a password manager); you'll need
+`INGEST_SECRET` again in Step 6 and `ADMIN_SECRET` again in Step 5.
+
+> For local development instead of a live deploy, copy
+> `apps/api/.dev.vars.example` to `apps/api/.dev.vars` and put test values
+> there (this file is git-ignored and never committed).
+
+### Step 4 — Create the database tables
 
 ```bash
 npx wrangler d1 migrations apply logpush-syslog-hub-db --remote
 ```
 
-This creates the `destinations`, `mappings`, and `destination_status` tables
-and seeds two ready-to-use generic mappings.
+This creates the `destinations`, `mappings`, and `destination_status`
+tables, and seeds two ready-to-use generic CEF mappings so you don't have to
+build one from scratch.
 
-### 4. Deploy
+### Step 5 — Deploy the Worker (API) and the web UI
 
 ```bash
-# API
+# Deploy the API — note the URL it prints, e.g. https://logpush-syslog-hub.<you>.workers.dev
 pnpm --filter @logpush-syslog-hub/api deploy
 
-# Web UI
-cd ../web && pnpm build && npx wrangler deploy
+# Build and deploy the web UI
+cd ../web
+pnpm build
+npx wrangler deploy
 ```
 
-Open the deployed web UI URL, then enter the API URL (from the API deploy
-output) and your `ADMIN_SECRET`. You're in.
+The second command also prints a URL, e.g.
+`https://logpush-syslog-hub-web.<you>.workers.dev`. Open it in a browser.
 
-### 5. Add a destination
+On first load you'll see a connection screen — enter:
 
-In the web UI, click **+ Add destination** and fill in your syslog server's
-host and port. Use **Test send** to confirm connectivity before wiring up
-real traffic.
+| Field | Value |
+|---|---|
+| **API base URL** | the API URL from the first deploy command above |
+| **Admin secret** | the `ADMIN_SECRET` value you set in Step 3 |
 
-### 6. Point Logpush at your Worker
+Click **Connect**. You should land on the Dashboard, showing a green
+"status: ok" badge. Deployment is done — move on to Part 2 to start
+forwarding logs.
+
+---
+
+## Part 2 — How to use it
+
+This is what you (or your team) will do regularly: add destinations, set up
+mappings, and point Logpush jobs at the Worker.
+
+### A. Add a syslog destination
+
+In the web UI, go to the **Destinations** tab and click **+ Add
+destination**. Fill in the form:
+
+| Field | What to enter |
+|---|---|
+| **Name** | A friendly label, e.g. `Production SIEM` |
+| **Host** | Your syslog server's IP or hostname |
+| **Port** | The TCP port it listens on (commonly `514`) |
+| **Transport** | `Direct (public TCP)` if your syslog server has a public IP; `Workers VPC` if it's private — see [Connecting to your syslog server](#connecting-to-your-syslog-server) |
+| **Framing** | `RFC 6587 octet-count` or `Newline-delimited` — see the table below if unsure |
+| **Dataset** | Which Logpush dataset this destination should receive (`http_requests`, `firewall_events`, or `all`) |
+| **CEF mapping** | Pick a mapping (the two generic defaults are pre-seeded), or `(generic fallback)` |
+| **Syslog hostname** | The `HOSTNAME` field written into each syslog message (defaults to `cloudflare`) |
+| **Enabled** | Leave checked to start receiving events immediately |
+
+Click **Save destination**.
+
+### B. Test the destination before going live
+
+On the Destinations list, click **Test send** next to your new destination.
+This sends one realistic sample event through the full pipeline (CEF
+formatting + TCP delivery) without needing a real Logpush job yet.
+
+- ✅ **"Delivered"** — the TCP connection and delivery worked. You're ready
+  to wire up real traffic.
+- ❌ **An error message** — see [Troubleshooting](#troubleshooting) below.
+
+### C. Create the Logpush job
+
+Run this once per Cloudflare zone you want to forward, replacing
+`$ZONE_ID`, `$CF_API_TOKEN`, `<your-worker>`, and `<INGEST_SECRET>`:
 
 ```bash
 curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/logpush/jobs" \
@@ -146,14 +231,45 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/logpush/jobs" 
   }'
 ```
 
-URL-encode the `Bearer ` prefix as `Bearer%20` before your `INGEST_SECRET`
-value. See [Cloudflare's HTTP destination
-docs](https://developers.cloudflare.com/logs/logpush/logpush-job/enable-destinations/http/)
-for details on `header_*` query parameters.
+A successful response includes `"success": true` and a job `"id"`. To also
+forward firewall events, repeat the command with
+`"dataset": "firewall_events"` and `/ingest/firewall_events` in the URL.
 
-Repeat with `"dataset": "firewall_events"` and `/ingest/firewall_events` to
-also forward firewall events. That's it — logs should start arriving at your
-syslog server within a minute or two.
+> **Note the URL encoding:** the `header_Authorization` value must be
+> `Bearer%20<INGEST_SECRET>` — that's the literal word `Bearer`, then `%20`
+> (a URL-encoded space), then your secret. Missing this is the #1 cause of
+> "it's not working."
+
+Within a minute or two, logs should start arriving at your syslog server.
+
+### D. Monitor delivery
+
+Go to the **Dashboard** tab in the web UI. For each destination you'll see:
+
+- **Forwarded** — total events successfully delivered
+- **Dropped** — events that failed after all retries
+- **Last success** / **Last error** — timestamps and error detail for the
+  most recent attempt
+
+If **Dropped** keeps growing, click into the destination's error message or
+re-run **Test send** to diagnose.
+
+### E. Customize field mappings (optional)
+
+The two seeded mappings (`Generic HTTP Requests (CEF)`,
+`Generic Firewall Events (CEF)`) work out of the box. To customize, or to
+add support for another Logpush dataset:
+
+1. Go to the **Mappings** tab → **+ Add mapping**.
+2. Give it a name and set **Dataset** to the Logpush dataset name (e.g.
+   `dns_logs`).
+3. Add rows: **cefKey** (the CEF extension key to emit, e.g. `src`),
+   **label** (optional, for `cnN`/`csN` keys, e.g. `country`), and either a
+   **sourceField** (the Logpush field name to pull the value from) or a
+   **staticValue** (a fixed string).
+4. Save, then select this mapping on any destination.
+
+---
 
 ## Connecting to your syslog server
 
@@ -163,7 +279,7 @@ syslog server within a minute or two.
 | Private / on-prem | `vpc` — reach it through a [Workers VPC Network](https://developers.cloudflare.com/workers-vpc/configuration/vpc-networks/) bound to a Cloudflare Tunnel or Mesh network. |
 
 To enable `vpc` transport, uncomment and configure the `vpc_networks` block
-in `apps/api/wrangler.jsonc`, then redeploy:
+in `apps/api/wrangler.jsonc`, then redeploy the API:
 
 ```jsonc
 "vpc_networks": [
@@ -191,9 +307,12 @@ If you're not sure, start with `newline` — most generic TCP syslog listeners
 expect it. Switch to `rfc6587` if your receiver explicitly supports
 length-prefixed framing (check its docs for "octet counting" or "RFC 6587").
 
+---
+
 ## Local development
 
-Try the whole pipeline locally in under a minute:
+Try the whole pipeline locally in under a minute — useful for testing before
+you touch a real syslog server:
 
 ```bash
 # Terminal 1: a plain TCP listener to see the output
@@ -217,13 +336,15 @@ printf '{"RayID":"test001","EdgeStartTimestamp":1720000000000000000,"ClientIP":"
 You should see a CEF syslog line appear in Terminal 1 within a couple of
 seconds.
 
-## Testing
+### Running the test suite
 
 ```bash
 pnpm -r typecheck
 pnpm --filter @logpush-syslog-hub/api test              # ~52 tests, ~90% coverage
 pnpm --filter @logpush-syslog-hub/api test -- --coverage
 ```
+
+---
 
 ## Troubleshooting
 
@@ -240,6 +361,11 @@ pnpm --filter @logpush-syslog-hub/api test -- --coverage
   ingest endpoint must respond `2xx` to Logpush's ownership check; make sure
   `INGEST_SECRET` in the job's `header_Authorization` matches the deployed
   Worker's secret exactly (including the `Bearer ` prefix, URL-encoded).
+- **The web UI shows "Unauthorized"** — double-check the `ADMIN_SECRET` you
+  entered on the connection screen matches what you set in Step 3. Click
+  **Disconnect** to re-enter it.
+
+---
 
 ## Roadmap
 
