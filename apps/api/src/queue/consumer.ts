@@ -1,4 +1,4 @@
-import { GENERIC_FALLBACK_RULES, QueueMessageSchema } from "@logpush-syslog-hub/shared";
+import { GENERIC_FALLBACK_RULES, QueueMessageSchema } from "../shared/index.js";
 import { getDestination, getMapping, recordDeliveryFailure, recordDeliverySuccess } from "../db/repo.js";
 import { buildCefMessage } from "../services/cef.js";
 import { sendSyslogMessage, SyslogDeliveryError, type VpcNetworkBinding } from "../services/syslog.js";

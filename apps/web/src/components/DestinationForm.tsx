@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import type { Destination, DestinationInput, Mapping } from "@logpush-syslog-hub/shared";
+import type { Destination, DestinationInput, Mapping } from "../types.js";
 
 const DATASET_OPTIONS = ["http_requests", "firewall_events", "all"];
 

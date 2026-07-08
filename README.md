@@ -20,12 +20,41 @@ standard CEF syslog. No custom parser required on the receiving end.
 **Current scope:** TCP delivery only (plaintext), no TLS yet, no UDP — see
 [Roadmap](#roadmap).
 
+## Deploy to Cloudflare
+
+Click the button, and Cloudflare will fork this repo into your own
+GitHub/GitLab account, provision the D1 database and Queue automatically,
+and deploy. No local clone, no `wrangler` CLI required.
+
+**1. Deploy the API** (this is the important one — it does the actual log forwarding):
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/pongpisit/logpush-syslog-hub/tree/main/apps/api)
+
+You'll be prompted to enter two values during setup — `INGEST_SECRET` and
+`ADMIN_SECRET` (generate each with `openssl rand -hex 32`). Everything else
+(the D1 database, the Queue + dead-letter queue, and the database schema
+migration) is created and applied automatically.
+
+**2. Deploy the web UI** (optional but recommended — lets you manage
+destinations without the CLI):
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/pongpisit/logpush-syslog-hub/tree/main/apps/web)
+
+No inputs needed for this one — it's a static site with no bindings.
+
+Once both are deployed, jump straight to [Part 2 — How to use
+it](#part-2--how-to-use-it) to add your first destination.
+
+> Prefer the command line, want to run it locally first, or forking to make
+> changes? Use the manual steps in [Part 1](#part-1--deploy-your-own-instance-manual) instead.
+
 ---
 
 ## Contents
 
 - [How it works](#how-it-works)
-- [Part 1 — Deploy your own instance](#part-1--deploy-your-own-instance) *(one-time setup)*
+- [Deploy to Cloudflare](#deploy-to-cloudflare) *(one-click)*
+- [Part 1 — Deploy your own instance (manual)](#part-1--deploy-your-own-instance-manual) *(CLI / local dev)*
 - [Part 2 — How to use it](#part-2--how-to-use-it) *(day-to-day)*
 - [Connecting to your syslog server](#connecting-to-your-syslog-server)
 - [Local development](#local-development)
@@ -68,20 +97,30 @@ the `http_requests` and `firewall_events` Logpush datasets, using only
 standard CEF keys, so the output is useful out of the box. You can add
 mappings for any other Logpush dataset from the web UI.
 
-### Monorepo layout
+### Repo layout
 
 ```
-apps/api/         Hono Worker: ingest endpoint, admin API, queue consumer, D1 schema
-apps/web/         React + Vite + Tailwind admin UI (destinations, mappings, dashboard)
-packages/shared/  Zod schemas + default CEF mappings shared by api and web
+apps/api/  Hono Worker: ingest endpoint, admin API, queue consumer, D1 schema.
+           Fully self-contained (no external workspace dependency) so it can
+           be deployed standalone via the "Deploy to Cloudflare" button.
+apps/web/  React + Vite + Tailwind admin UI (destinations, mappings, dashboard).
+           Also fully self-contained; a static site with no bindings.
 ```
+
+Both apps keep their own copy of the shared data types
+(`apps/api/src/shared/`, `apps/web/src/types.ts`) instead of a shared
+workspace package — Cloudflare's Deploy to Cloudflare button requires each
+Worker's subdirectory to be fully isolated, including its dependencies.
 
 ---
 
-## Part 1 — Deploy your own instance
+## Part 1 — Deploy your own instance (manual)
 
-This is a **one-time setup** you (or whoever runs the infrastructure) do
-once. If someone has already deployed this for you, skip straight to
+This is the command-line path — use it if you want to run the project
+locally, make changes before deploying, or just prefer the CLI over the
+[Deploy to Cloudflare buttons](#deploy-to-cloudflare) above. This is a
+**one-time setup** you (or whoever runs the infrastructure) do once. If
+someone has already deployed this for you, skip straight to
 [Part 2 — How to use it](#part-2--how-to-use-it).
 
 **You will need:**
@@ -127,26 +166,20 @@ openssl rand -hex 32
 ```
 
 Save both values somewhere safe (e.g. a password manager); you'll need
-`INGEST_SECRET` again in Step 6 and `ADMIN_SECRET` again in Step 5.
+`ADMIN_SECRET` again in the next step, and `INGEST_SECRET` again when you
+[create the Logpush job](#c-create-the-logpush-job) in Part 2.
 
 > For local development instead of a live deploy, copy
 > `apps/api/.dev.vars.example` to `apps/api/.dev.vars` and put test values
 > there (this file is git-ignored and never committed).
 
-### Step 4 — Create the database tables
+### Step 4 — Deploy the API and the web UI
 
 ```bash
-npx wrangler d1 migrations apply logpush-syslog-hub-db --remote
-```
-
-This creates the `destinations`, `mappings`, and `destination_status`
-tables, and seeds two ready-to-use generic CEF mappings so you don't have to
-build one from scratch.
-
-### Step 5 — Deploy the Worker (API) and the web UI
-
-```bash
-# Deploy the API — note the URL it prints, e.g. https://logpush-syslog-hub.<you>.workers.dev
+# Deploy the API — this also applies D1 migrations automatically, creating
+# the destinations/mappings/destination_status tables and seeding two
+# ready-to-use generic CEF mappings. Note the URL it prints, e.g.
+# https://logpush-syslog-hub.<you>.workers.dev
 pnpm --filter @logpush-syslog-hub/api deploy
 
 # Build and deploy the web UI

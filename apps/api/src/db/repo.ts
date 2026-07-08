@@ -5,7 +5,7 @@ import type {
   Mapping,
   MappingInput,
   MappingRule,
-} from "@logpush-syslog-hub/shared";
+} from "../shared/index.js";
 
 interface DestinationRow {
   id: string;

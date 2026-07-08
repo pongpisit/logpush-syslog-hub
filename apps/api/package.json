@@ -5,14 +5,24 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run db:migrate && wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply DB --remote",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
     "types": "wrangler types",
     "test": "vitest run",
     "lint": "tsc --noEmit"
   },
+  "cloudflare": {
+    "bindings": {
+      "INGEST_SECRET": {
+        "description": "Secret Logpush sends as `Authorization: Bearer <value>` in the `header_Authorization` query parameter of the job's `destination_conf`. Generate with `openssl rand -hex 32`."
+      },
+      "ADMIN_SECRET": {
+        "description": "Secret used to authenticate the web UI / admin API (`/admin/*`). Generate with `openssl rand -hex 32`."
+      }
+    }
+  },
   "dependencies": {
-    "@logpush-syslog-hub/shared": "workspace:*",
     "hono": "^4.6.14",
     "zod": "^3.24.1"
   },

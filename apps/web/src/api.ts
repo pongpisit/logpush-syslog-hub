@@ -4,7 +4,7 @@ import type {
   DestinationStatus,
   Mapping,
   MappingInput,
-} from "@logpush-syslog-hub/shared";
+} from "./types.js";
 
 const API_BASE_KEY = "lsh:apiBase";
 const ADMIN_SECRET_KEY = "lsh:adminSecret";

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Mapping, MappingInput, MappingRule } from "@logpush-syslog-hub/shared";
+import type { Mapping, MappingInput, MappingRule } from "../types.js";
 
 const EMPTY_RULE: MappingRule = { cefKey: "", sourceField: "" };
 

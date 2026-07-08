@@ -8,7 +8,7 @@ import {
   syslogPri,
   toEpochMs,
 } from "../src/services/cef.js";
-import { DEFAULT_MAPPING_RULES } from "@logpush-syslog-hub/shared";
+import { DEFAULT_MAPPING_RULES } from "../src/shared/index.js";
 
 describe("escapeCefHeader", () => {
   it("escapes backslash and pipe", () => {

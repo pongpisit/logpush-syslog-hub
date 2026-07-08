@@ -1,5 +1,5 @@
 import { connect } from "cloudflare:sockets";
-import type { Destination } from "@logpush-syslog-hub/shared";
+import type { Destination } from "../shared/index.js";
 
 /**
  * Minimal shape of a Workers VPC Network binding's connect() method.

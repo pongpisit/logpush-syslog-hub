@@ -1,5 +1,4 @@
-import type { LogpushRecord, MappingRule } from "@logpush-syslog-hub/shared";
-import { DATASET_LABELS } from "@logpush-syslog-hub/shared";
+import { DATASET_LABELS, type LogpushRecord, type MappingRule } from "../shared/index.js";
 
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",

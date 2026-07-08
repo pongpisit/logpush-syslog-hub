@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Destination, DestinationInput, Mapping } from "@logpush-syslog-hub/shared";
+import type { Destination, DestinationInput, Mapping } from "../types.js";
 import {
   createDestination,
   deleteDestination,

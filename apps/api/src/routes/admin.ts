@@ -2,9 +2,10 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
   DestinationInputSchema,
+  GENERIC_FALLBACK_RULES,
   MappingInputSchema,
   TestSendInputSchema,
-} from "@logpush-syslog-hub/shared";
+} from "../shared/index.js";
 import { bearerAuth } from "../middleware/auth.js";
 import {
   createDestination,
@@ -22,7 +23,6 @@ import {
   updateMapping,
 } from "../db/repo.js";
 import { buildCefMessage } from "../services/cef.js";
-import { GENERIC_FALLBACK_RULES } from "@logpush-syslog-hub/shared";
 import { sendSyslogMessage, SyslogDeliveryError } from "../services/syslog.js";
 
 export const adminRoute = new Hono<{ Bindings: Env }>();

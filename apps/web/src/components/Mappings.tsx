@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Mapping, MappingInput } from "@logpush-syslog-hub/shared";
+import type { Mapping, MappingInput } from "../types.js";
 import { createMapping, deleteMapping, listMappings, updateMapping } from "../api.js";
 import { MappingForm } from "./MappingForm.js";
 

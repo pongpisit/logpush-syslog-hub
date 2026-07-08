@@ -9,7 +9,7 @@ destinations, with a web UI for managing destinations and field mappings.
 
 ## Tasks
 
-- [x] 1. Monorepo scaffold (pnpm workspaces: apps/api, apps/web, packages/shared)
+- [x] 1. Monorepo scaffold (pnpm workspaces: apps/api, apps/web)
 - [x] 2. Cloudflare resources
   - [x] 2.1 D1 database `logpush-syslog-hub-db` created
   - [x] 2.2 Queue `logpush-syslog-queue` + DLQ `logpush-syslog-queue-dlq` created
@@ -34,6 +34,24 @@ destinations, with a web UI for managing destinations and field mappings.
   - Found + fixed in production testing: duplicate `rt=` CEF key, and a Workers-runtime
     gotcha where `Date.now()` computed at module scope returns 0 (see migration 0002 and
     the `fix:` commit)
+- [x] 11. Added "Deploy to Cloudflare" buttons for one-click deploy:
+  - Removed `packages/shared`; vendored its contents into
+    `apps/api/src/shared/` (Zod schemas + CEF defaults, used at runtime) and
+    `apps/web/src/types.ts` (plain TS interfaces, no runtime deps). Required
+    because Cloudflare's Deploy to Cloudflare button needs each Worker's
+    subdirectory to be fully isolated, including dependencies — a pnpm
+    workspace `workspace:*` dependency breaks that.
+  - Verified isolation for real: copied each app to a scratch directory with
+    no sibling packages, ran `npm install` (not pnpm) from scratch, then
+    `tsc --noEmit`, the full test suite, and `wrangler deploy --dry-run` —
+    all passed for both apps.
+  - `apps/api`'s `deploy` script now runs `wrangler d1 migrations apply DB
+    --remote` before `wrangler deploy` (binding name, not database name, per
+    Cloudflare's guidance, so it works regardless of what the button
+    auto-provisions the database as) — verified against the live account.
+  - Added `cloudflare.bindings.*.description` to `apps/api/package.json` so
+    the button's setup screen shows friendly prompts for `INGEST_SECRET` and
+    `ADMIN_SECRET`.
 
 ## Notes / Decisions
 

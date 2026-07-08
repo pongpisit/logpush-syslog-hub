@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { DestinationStatus } from "@logpush-syslog-hub/shared";
+import type { DestinationStatus } from "../types.js";
 import { ApiError, getHealth, listStatuses, type HealthResponse } from "../api.js";
 
 export function Dashboard() {

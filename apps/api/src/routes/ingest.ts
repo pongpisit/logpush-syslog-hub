@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { LogpushRecordSchema, type QueueMessage } from "@logpush-syslog-hub/shared";
+import { LogpushRecordSchema, type QueueMessage } from "../shared/index.js";
 import { bearerAuth } from "../middleware/auth.js";
 import { decompressIfNeeded, parseNdjsonStream } from "../services/parser.js";
 import { listEnabledDestinationsForDataset } from "../db/repo.js";
