@@ -24,9 +24,16 @@ destinations, with a web UI for managing destinations and field mappings.
 - [x] 5. Tests: 51 tests, ~89% statement / ~93% line coverage (vitest + @cloudflare/vitest-pool-workers)
 - [x] 6. Web UI (React + Vite + Tailwind): Dashboard, Destinations, Mappings, Settings gate
 - [x] 7. Docs: README, LICENSE (MIT), PROGRESS.md
-- [ ] 8. GitHub Actions CI (typecheck + test)
-- [ ] 9. Push to public GitHub repo
-- [ ] 10. Deploy API + Pages UI to Cloudflare and verify `/health` end-to-end
+- [x] 8. GitHub Actions CI (typecheck + test) — https://github.com/pongpisit/logpush-syslog-hub/actions
+- [x] 9. Pushed to public GitHub repo — https://github.com/pongpisit/logpush-syslog-hub
+- [x] 10. Deployed to Cloudflare and verified end-to-end:
+  - API: https://logpush-syslog-hub.pongpisit.workers.dev (`/health` returns `{"status":"ok",...}`)
+  - Web UI: https://logpush-syslog-hub-web.pongpisit.workers.dev (Workers static assets, not Pages)
+  - Verified live: admin CRUD, ingest gzip/NDJSON parsing + auth, CEF test-send against
+    an unreachable destination (confirmed fast, correct error handling, no hangs)
+  - Found + fixed in production testing: duplicate `rt=` CEF key, and a Workers-runtime
+    gotcha where `Date.now()` computed at module scope returns 0 (see migration 0002 and
+    the `fix:` commit)
 
 ## Notes / Decisions
 
@@ -44,4 +51,4 @@ destinations, with a web UI for managing destinations and field mappings.
 - [x] Timing-safe bearer token comparison (SHA-256 digest + `crypto.subtle.timingSafeEqual`)
 - [x] CORS on `/admin/*` locked to a configurable `ADMIN_ALLOWED_ORIGIN`
 - [x] No `any` types; `wrangler types` used for `Env` (secrets augmented in `src/secrets.d.ts`)
-- [ ] `npm audit` run before first deploy
+- [x] `pnpm audit --prod` run before first deploy — no known vulnerabilities

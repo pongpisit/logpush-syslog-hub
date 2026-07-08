@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "test": "echo \"no web tests yet\"",
-    "deploy": "wrangler pages deploy dist"
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "@logpush-syslog-hub/shared": "workspace:*",

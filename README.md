@@ -101,13 +101,16 @@ Note the deployed URL, e.g. `https://logpush-syslog-hub.<subdomain>.workers.dev`
 
 ## 6. Deploy the admin UI
 
+Deployed as a Workers static-assets site (Cloudflare's current recommended
+approach for static sites, replacing Pages):
+
 ```bash
 cd apps/web
 pnpm build
-npx wrangler pages deploy dist --project-name=logpush-syslog-hub-web
+npx wrangler deploy
 ```
 
-Open the deployed Pages URL, then enter:
+Open the deployed Worker URL, then enter:
 - **API base URL**: the Worker URL from step 5
 - **Admin secret**: the `ADMIN_SECRET` value from step 3
 
