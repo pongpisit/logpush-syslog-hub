@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  min-height: 100vh;
+}
+
+.input {
+  @apply rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none;
+}
+.input:focus {
+  @apply border-tangerine;
+}
+.link {
+  @apply text-sm text-tangerine hover:underline;
+}

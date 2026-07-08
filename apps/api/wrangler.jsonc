@@ -1,0 +1,46 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "logpush-syslog-hub",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-08",
+  "observability": {
+    "enabled": true
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "logpush-syslog-hub-db",
+      "database_id": "eada8e7a-cd45-4717-9960-b8855b77ae8c",
+      "migrations_dir": "src/db/migrations"
+    }
+  ],
+
+  "queues": {
+    "producers": [
+      { "binding": "SYSLOG_QUEUE", "queue": "logpush-syslog-queue" }
+    ],
+    "consumers": [
+      {
+        "queue": "logpush-syslog-queue",
+        "max_batch_size": 25,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "dead_letter_queue": "logpush-syslog-queue-dlq"
+      }
+    ]
+  },
+
+  // Workers VPC Network binding is OPTIONAL: only required for destinations
+  // with transport="vpc" (private syslog servers reached through a
+  // Cloudflare Tunnel or Cloudflare Mesh). connect() over VPC Networks is
+  // plaintext TCP only. See README.md "Private destinations (Workers VPC)".
+  //
+  // "vpc_networks": [
+  //   { "binding": "SYSLOG_VPC", "tunnel_id": "<YOUR_TUNNEL_UUID>", "remote": true }
+  // ],
+
+  "vars": {
+    "SYSLOG_HOSTNAME_DEFAULT": "cloudflare"
+  }
+}
