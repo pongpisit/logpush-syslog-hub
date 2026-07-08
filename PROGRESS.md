@@ -39,7 +39,7 @@ destinations, with a web UI for managing destinations and field mappings.
 
 - Transport scope for v1: **TCP only, no TLS, no UDP** (explicit user decision).
 - CEF mapping: generic, vendor-agnostic default mappings using only standard CEF keys
-  so output works across NetWitness, Splunk, QRadar, Sentinel, etc. without customization.
+  so output works with any CEF-aware SIEM or generic syslog receiver without customization.
 - Admin auth: shared `ADMIN_SECRET` bearer token for MVP (Cloudflare Access deferred to roadmap).
 - One `SYSLOG_VPC` Workers VPC Network binding is shared across all `transport=vpc`
   destinations (VPC Networks route by runtime address, unlike VPC Services).

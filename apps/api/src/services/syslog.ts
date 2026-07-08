@@ -34,9 +34,10 @@ export function frameMessage(message: string, frame: "rfc6587" | "newline"): Uin
  *  - transport "vpc": plaintext TCP via a Workers VPC Network binding
  *    (reaches any host:port behind the bound Cloudflare Tunnel/Mesh).
  * Framing:
- *  - "rfc6587": octet-count prefix `"<byteLength> "` before the message (recommended;
- *    matches RFC 6587 and NetWitness's `syslog-lengthprefix-tcp` event source).
- *  - "newline": a trailing `\n` after the message (classic line-delimited syslog-tcp).
+ *  - "rfc6587": octet-count prefix `"<byteLength> "` before the message (robust
+ *    length-prefixed TCP syslog framing per RFC 6587).
+ *  - "newline": a trailing `\n` after the message (classic line-delimited TCP syslog,
+ *    the default expected by most syslog daemons such as rsyslog and syslog-ng).
  */
 export async function sendSyslogMessage(
   destination: Pick<Destination, "host" | "port" | "transport" | "frame">,
