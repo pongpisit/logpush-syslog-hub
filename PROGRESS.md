@@ -89,9 +89,12 @@ destinations, with a web UI for managing destinations and field mappings.
     `/api/admin/*` without/with the bearer token (401 / 200), and the built
     JS/CSS asset URLs (200, correct content-type). All 52 tests still pass;
     `tsc --noEmit` passes for the Worker, `test/`, and `ui/` separately.
-  - **Not yet done**: redeploy the merged Worker to the live account and
-    verify in production; decide whether to delete the now-redundant
-    `logpush-syslog-hub-web` Worker.
+  - Redeployed the merged Worker to the live account
+    (https://logpush-syslog-hub.pongpisit.workers.dev) and repeated the
+    same verification. Pushed to GitHub; CI green.
+  - Deleted the now-redundant `logpush-syslog-hub-web` Worker (confirmed
+    user decision) — verified it now 404s and the merged Worker is
+    unaffected.
 
 ## Notes / Decisions
 
