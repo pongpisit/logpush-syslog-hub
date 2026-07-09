@@ -14,12 +14,12 @@ function authed(init: RequestInit = {}): RequestInit {
 
 describe("admin auth", () => {
   it("rejects requests without a bearer token", async () => {
-    const res = await SELF.fetch("https://example.com/admin/destinations");
+    const res = await SELF.fetch("https://example.com/api/admin/destinations");
     expect(res.status).toBe(401);
   });
 
   it("rejects requests with the wrong bearer token", async () => {
-    const res = await SELF.fetch("https://example.com/admin/destinations", {
+    const res = await SELF.fetch("https://example.com/api/admin/destinations", {
       headers: { Authorization: "Bearer nope" },
     });
     expect(res.status).toBe(401);
@@ -28,7 +28,7 @@ describe("admin auth", () => {
 
 describe("admin mappings CRUD", () => {
   it("lists the seeded default mappings", async () => {
-    const res = await SELF.fetch("https://example.com/admin/mappings", authed());
+    const res = await SELF.fetch("https://example.com/api/admin/mappings", authed());
     expect(res.status).toBe(200);
     const body = await res.json<{ mappings: Array<{ id: string }> }>();
     const ids = body.mappings.map((m) => m.id);
@@ -38,7 +38,7 @@ describe("admin mappings CRUD", () => {
 
   it("creates, updates, and deletes a custom mapping", async () => {
     const createRes = await SELF.fetch(
-      "https://example.com/admin/mappings",
+      "https://example.com/api/admin/mappings",
       authed({
         method: "POST",
         body: JSON.stringify({
@@ -53,7 +53,7 @@ describe("admin mappings CRUD", () => {
     const id = created.mapping.id;
 
     const updateRes = await SELF.fetch(
-      `https://example.com/admin/mappings/${id}`,
+      `https://example.com/api/admin/mappings/${id}`,
       authed({
         method: "PUT",
         body: JSON.stringify({
@@ -68,13 +68,13 @@ describe("admin mappings CRUD", () => {
     expect(updated.mapping.name).toBe("Test Mapping Updated");
 
     const deleteRes = await SELF.fetch(
-      `https://example.com/admin/mappings/${id}`,
+      `https://example.com/api/admin/mappings/${id}`,
       authed({ method: "DELETE" }),
     );
     expect(deleteRes.status).toBe(204);
 
     const getMissing = await SELF.fetch(
-      `https://example.com/admin/mappings/${id}`,
+      `https://example.com/api/admin/mappings/${id}`,
       authed({ method: "PUT", body: JSON.stringify({ name: "x", dataset: "y", rules: [] }) }),
     );
     expect(getMissing.status).toBe(404);
@@ -82,7 +82,7 @@ describe("admin mappings CRUD", () => {
 
   it("rejects an invalid mapping payload", async () => {
     const res = await SELF.fetch(
-      "https://example.com/admin/mappings",
+      "https://example.com/api/admin/mappings",
       authed({ method: "POST", body: JSON.stringify({ name: "" }) }),
     );
     expect(res.status).toBe(400);
@@ -92,7 +92,7 @@ describe("admin mappings CRUD", () => {
 describe("admin destinations CRUD", () => {
   it("creates, lists, updates, and deletes a destination", async () => {
     const createRes = await SELF.fetch(
-      "https://example.com/admin/destinations",
+      "https://example.com/api/admin/destinations",
       authed({
         method: "POST",
         body: JSON.stringify({
@@ -113,16 +113,16 @@ describe("admin destinations CRUD", () => {
     const created = await createRes.json<{ destination: { id: string } }>();
     const id = created.destination.id;
 
-    const listRes = await SELF.fetch("https://example.com/admin/destinations", authed());
+    const listRes = await SELF.fetch("https://example.com/api/admin/destinations", authed());
     const list = await listRes.json<{ destinations: Array<{ id: string }> }>();
     expect(list.destinations.some((d) => d.id === id)).toBe(true);
 
-    const statusRes = await SELF.fetch("https://example.com/admin/status", authed());
+    const statusRes = await SELF.fetch("https://example.com/api/admin/status", authed());
     const status = await statusRes.json<{ statuses: Array<{ destinationId: string }> }>();
     expect(status.statuses.some((s) => s.destinationId === id)).toBe(true);
 
     const updateRes = await SELF.fetch(
-      `https://example.com/admin/destinations/${id}`,
+      `https://example.com/api/admin/destinations/${id}`,
       authed({
         method: "PUT",
         body: JSON.stringify({
@@ -142,13 +142,13 @@ describe("admin destinations CRUD", () => {
     expect(updateRes.status).toBe(200);
 
     const deleteRes = await SELF.fetch(
-      `https://example.com/admin/destinations/${id}`,
+      `https://example.com/api/admin/destinations/${id}`,
       authed({ method: "DELETE" }),
     );
     expect(deleteRes.status).toBe(204);
 
     const deleteAgain = await SELF.fetch(
-      `https://example.com/admin/destinations/${id}`,
+      `https://example.com/api/admin/destinations/${id}`,
       authed({ method: "DELETE" }),
     );
     expect(deleteAgain.status).toBe(404);
@@ -156,7 +156,7 @@ describe("admin destinations CRUD", () => {
 
   it("rejects an invalid destination payload", async () => {
     const res = await SELF.fetch(
-      "https://example.com/admin/destinations",
+      "https://example.com/api/admin/destinations",
       authed({ method: "POST", body: JSON.stringify({ name: "x" }) }),
     );
     expect(res.status).toBe(400);
@@ -166,7 +166,7 @@ describe("admin destinations CRUD", () => {
 describe("admin test-send", () => {
   it("returns 404 for an unknown destination", async () => {
     const res = await SELF.fetch(
-      "https://example.com/admin/test-send",
+      "https://example.com/api/admin/test-send",
       authed({ method: "POST", body: JSON.stringify({ destinationId: "missing" }) }),
     );
     expect(res.status).toBe(404);
@@ -174,7 +174,7 @@ describe("admin test-send", () => {
 
   it("returns 502 with the formatted CEF message when delivery fails", async () => {
     const createRes = await SELF.fetch(
-      "https://example.com/admin/destinations",
+      "https://example.com/api/admin/destinations",
       authed({
         method: "POST",
         body: JSON.stringify({
@@ -194,7 +194,7 @@ describe("admin test-send", () => {
     const created = await createRes.json<{ destination: { id: string } }>();
 
     const res = await SELF.fetch(
-      "https://example.com/admin/test-send",
+      "https://example.com/api/admin/test-send",
       authed({
         method: "POST",
         body: JSON.stringify({ destinationId: created.destination.id }),

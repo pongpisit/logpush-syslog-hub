@@ -10,7 +10,5 @@ declare global {
   interface Env {
     INGEST_SECRET: string;
     ADMIN_SECRET: string;
-    /** Optional: origin allowed to call /admin/* endpoints (the deployed Pages URL). */
-    ADMIN_ALLOWED_ORIGIN?: string;
   }
 }

@@ -52,6 +52,46 @@ destinations, with a web UI for managing destinations and field mappings.
   - Added `cloudflare.bindings.*.description` to `apps/api/package.json` so
     the button's setup screen shows friendly prompts for `INGEST_SECRET` and
     `ADMIN_SECRET`.
+- [x] 12. Merged the API and web UI into a **single Worker project** (user
+  decision: project is small enough that two separate deployments added
+  more overhead than value):
+  - Flattened the monorepo: `apps/api/*` → project root (`src/`, `test/`,
+    `tsconfig.json`, `vitest.config.ts`), `apps/web/*` → `ui/`. Removed
+    `apps/`, `pnpm-workspace.yaml`; single root `package.json` and
+    `wrangler.jsonc`.
+  - `wrangler.jsonc` now has an `assets` block (`directory: "./dist"`,
+    `binding: "ASSETS"`, `run_worker_first: true`,
+    `not_found_handling: "single-page-application"`) alongside the existing
+    `main` Worker script — one Worker serves both.
+  - Moved all API routes under `/api/*` (`/api/health`, `/api/ingest/:dataset`,
+    `/api/admin/*`). In `src/index.ts`, unmatched `/api/*` requests return a
+    JSON 404; every other unmatched request defers to
+    `env.ASSETS.fetch(request)`, which serves the React SPA (and falls back
+    to `index.html` for client-side routes like `/destinations`).
+  - Removed CORS entirely (`hono/cors`, `ADMIN_ALLOWED_ORIGIN`) — UI and API
+    are now same-origin.
+  - Simplified the web UI: removed the "API base URL" setting; `ui/src/api.ts`
+    now calls relative `/api/*` paths. Settings screen only asks for
+    `ADMIN_SECRET`.
+  - `ui/vite.config.ts` builds to `../dist` (project root) instead of
+    `ui/dist`; both `npm run build` and `npm run dev:ui` `cd` into `ui/`
+    first so Tailwind/PostCSS's cosmiconfig-based config discovery (which
+    only searches upward from cwd, not into subdirectories) finds
+    `ui/tailwind.config.js` and `ui/postcss.config.js`.
+  - Added `pretest: npm run build` — the Worker's `assets.directory` must
+    exist on disk before `@cloudflare/vitest-pool-workers` can start
+    Miniflare, so tests build the UI first automatically.
+  - `npm run deploy` = build UI → apply D1 migrations (`--remote`) →
+    `wrangler deploy`.
+  - Verified for real, not just in-repo: ran `wrangler dev` locally and
+    curl-tested every path class — `/api/health` (JSON), `/` and
+    `/destinations` (SPA `index.html`, 200), `/api/nonexistent` (JSON 404),
+    `/api/admin/*` without/with the bearer token (401 / 200), and the built
+    JS/CSS asset URLs (200, correct content-type). All 52 tests still pass;
+    `tsc --noEmit` passes for the Worker, `test/`, and `ui/` separately.
+  - **Not yet done**: redeploy the merged Worker to the live account and
+    verify in production; decide whether to delete the now-redundant
+    `logpush-syslog-hub-web` Worker.
 
 ## Notes / Decisions
 
@@ -67,6 +107,6 @@ destinations, with a web UI for managing destinations and field mappings.
 - [x] Secrets (`INGEST_SECRET`, `ADMIN_SECRET`) via `wrangler secret put`, never hardcoded
 - [x] Zod validation on all admin/ingest inputs
 - [x] Timing-safe bearer token comparison (SHA-256 digest + `crypto.subtle.timingSafeEqual`)
-- [x] CORS on `/admin/*` locked to a configurable `ADMIN_ALLOWED_ORIGIN`
+- [x] No CORS needed on `/api/admin/*` — UI and API are same-origin (single Worker)
 - [x] No `any` types; `wrangler types` used for `Env` (secrets augmented in `src/secrets.d.ts`)
 - [x] `pnpm audit --prod` run before first deploy — no known vulnerabilities

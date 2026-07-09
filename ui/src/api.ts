@@ -6,23 +6,22 @@ import type {
   MappingInput,
 } from "./types.js";
 
-const API_BASE_KEY = "lsh:apiBase";
+// The UI is served by the same Worker as the API (see wrangler.jsonc
+// `assets` config), so all requests are same-origin — no API base URL to
+// configure, just the admin secret.
 const ADMIN_SECRET_KEY = "lsh:adminSecret";
 
-export function getSettings(): { apiBase: string; adminSecret: string } {
+export function getSettings(): { adminSecret: string } {
   return {
-    apiBase: localStorage.getItem(API_BASE_KEY) ?? "",
     adminSecret: localStorage.getItem(ADMIN_SECRET_KEY) ?? "",
   };
 }
 
-export function saveSettings(apiBase: string, adminSecret: string): void {
-  localStorage.setItem(API_BASE_KEY, apiBase.replace(/\/+$/, ""));
+export function saveSettings(adminSecret: string): void {
   localStorage.setItem(ADMIN_SECRET_KEY, adminSecret);
 }
 
 export function clearSettings(): void {
-  localStorage.removeItem(API_BASE_KEY);
   localStorage.removeItem(ADMIN_SECRET_KEY);
 }
 
@@ -36,10 +35,9 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const { apiBase, adminSecret } = getSettings();
-  if (!apiBase) throw new ApiError("API base URL is not configured", 0);
+  const { adminSecret } = getSettings();
 
-  const res = await fetch(`${apiBase}${path}`, {
+  const res = await fetch(path, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -67,53 +65,52 @@ export interface HealthResponse {
 }
 
 export async function getHealth(): Promise<HealthResponse> {
-  const { apiBase } = getSettings();
-  const res = await fetch(`${apiBase}/health`);
+  const res = await fetch("/api/health");
   if (!res.ok) throw new ApiError("Health check failed", res.status);
   return res.json();
 }
 
 export const listDestinations = () =>
-  request<{ destinations: Destination[] }>("/admin/destinations").then((r) => r.destinations);
+  request<{ destinations: Destination[] }>("/api/admin/destinations").then((r) => r.destinations);
 
 export const createDestination = (input: DestinationInput) =>
-  request<{ destination: Destination }>("/admin/destinations", {
+  request<{ destination: Destination }>("/api/admin/destinations", {
     method: "POST",
     body: JSON.stringify(input),
   }).then((r) => r.destination);
 
 export const updateDestination = (id: string, input: DestinationInput) =>
-  request<{ destination: Destination }>(`/admin/destinations/${id}`, {
+  request<{ destination: Destination }>(`/api/admin/destinations/${id}`, {
     method: "PUT",
     body: JSON.stringify(input),
   }).then((r) => r.destination);
 
 export const deleteDestination = (id: string) =>
-  request<void>(`/admin/destinations/${id}`, { method: "DELETE" });
+  request<void>(`/api/admin/destinations/${id}`, { method: "DELETE" });
 
 export const listMappings = () =>
-  request<{ mappings: Mapping[] }>("/admin/mappings").then((r) => r.mappings);
+  request<{ mappings: Mapping[] }>("/api/admin/mappings").then((r) => r.mappings);
 
 export const createMapping = (input: MappingInput) =>
-  request<{ mapping: Mapping }>("/admin/mappings", {
+  request<{ mapping: Mapping }>("/api/admin/mappings", {
     method: "POST",
     body: JSON.stringify(input),
   }).then((r) => r.mapping);
 
 export const updateMapping = (id: string, input: MappingInput) =>
-  request<{ mapping: Mapping }>(`/admin/mappings/${id}`, {
+  request<{ mapping: Mapping }>(`/api/admin/mappings/${id}`, {
     method: "PUT",
     body: JSON.stringify(input),
   }).then((r) => r.mapping);
 
 export const deleteMapping = (id: string) =>
-  request<void>(`/admin/mappings/${id}`, { method: "DELETE" });
+  request<void>(`/api/admin/mappings/${id}`, { method: "DELETE" });
 
 export const listStatuses = () =>
-  request<{ statuses: DestinationStatus[] }>("/admin/status").then((r) => r.statuses);
+  request<{ statuses: DestinationStatus[] }>("/api/admin/status").then((r) => r.statuses);
 
 export const testSend = (destinationId: string) =>
-  request<{ ok: boolean; message: string; error?: string }>("/admin/test-send", {
+  request<{ ok: boolean; message: string; error?: string }>("/api/admin/test-send", {
     method: "POST",
     body: JSON.stringify({ destinationId }),
   });

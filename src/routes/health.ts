@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 export const healthRoute = new Hono<{ Bindings: Env }>();
 
-healthRoute.get("/health", async (c) => {
+healthRoute.get("/api/health", async (c) => {
   let dbOk = false;
   try {
     await c.env.DB.prepare("SELECT 1").first();

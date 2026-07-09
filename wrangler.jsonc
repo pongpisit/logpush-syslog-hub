@@ -7,6 +7,19 @@
     "enabled": true
   },
 
+  // The built-in web UI (built by `npm run build` into ./dist) is served for
+  // any request the Worker doesn't handle itself. `run_worker_first` makes
+  // sure every request — including admin API calls — reaches the Worker
+  // first; the Worker then defers to `env.ASSETS.fetch()` for anything that
+  // isn't under /api/*. `single-page-application` makes unknown client-side
+  // routes (e.g. /destinations) resolve to index.html instead of a 404.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+
   "d1_databases": [
     {
       "binding": "DB",

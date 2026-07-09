@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import {
   DestinationInputSchema,
   GENERIC_FALLBACK_RULES,
@@ -27,30 +26,18 @@ import { sendSyslogMessage, SyslogDeliveryError } from "../services/syslog.js";
 
 export const adminRoute = new Hono<{ Bindings: Env }>();
 
-// Admin API is same-origin-only by default; set ADMIN_ALLOWED_ORIGIN to your
-// deployed Pages URL to allow the web UI to call this API cross-origin.
-adminRoute.use(
-  "/admin/*",
-  cors({
-    origin: (origin, c) => {
-      const allowed = (c.env as unknown as Record<string, string | undefined>).ADMIN_ALLOWED_ORIGIN;
-      if (!allowed) return origin ?? "";
-      return origin === allowed ? origin : "";
-    },
-    allowMethods: ["GET", "POST", "PUT", "DELETE"],
-    allowHeaders: ["Content-Type", "Authorization"],
-  }),
-);
-adminRoute.use("/admin/*", bearerAuth("ADMIN_SECRET"));
+// The admin API is same-origin: it's served by the same Worker as the web
+// UI, so no CORS configuration is needed.
+adminRoute.use("/api/admin/*", bearerAuth("ADMIN_SECRET"));
 
 // ---- Destinations ----
 
-adminRoute.get("/admin/destinations", async (c) => {
+adminRoute.get("/api/admin/destinations", async (c) => {
   const destinations = await listDestinations(c.env.DB);
   return c.json({ destinations });
 });
 
-adminRoute.post("/admin/destinations", async (c) => {
+adminRoute.post("/api/admin/destinations", async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = DestinationInputSchema.safeParse(body);
   if (!parsed.success) {
@@ -60,7 +47,7 @@ adminRoute.post("/admin/destinations", async (c) => {
   return c.json({ destination }, 201);
 });
 
-adminRoute.put("/admin/destinations/:id", async (c) => {
+adminRoute.put("/api/admin/destinations/:id", async (c) => {
   const id = c.req.param("id");
   const body = await c.req.json().catch(() => null);
   const parsed = DestinationInputSchema.safeParse(body);
@@ -72,7 +59,7 @@ adminRoute.put("/admin/destinations/:id", async (c) => {
   return c.json({ destination });
 });
 
-adminRoute.delete("/admin/destinations/:id", async (c) => {
+adminRoute.delete("/api/admin/destinations/:id", async (c) => {
   const id = c.req.param("id");
   const deleted = await deleteDestination(c.env.DB, id);
   if (!deleted) return c.json({ error: "Not found" }, 404);
@@ -81,12 +68,12 @@ adminRoute.delete("/admin/destinations/:id", async (c) => {
 
 // ---- Mappings ----
 
-adminRoute.get("/admin/mappings", async (c) => {
+adminRoute.get("/api/admin/mappings", async (c) => {
   const mappings = await listMappings(c.env.DB);
   return c.json({ mappings });
 });
 
-adminRoute.post("/admin/mappings", async (c) => {
+adminRoute.post("/api/admin/mappings", async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = MappingInputSchema.safeParse(body);
   if (!parsed.success) {
@@ -96,7 +83,7 @@ adminRoute.post("/admin/mappings", async (c) => {
   return c.json({ mapping }, 201);
 });
 
-adminRoute.put("/admin/mappings/:id", async (c) => {
+adminRoute.put("/api/admin/mappings/:id", async (c) => {
   const id = c.req.param("id");
   const body = await c.req.json().catch(() => null);
   const parsed = MappingInputSchema.safeParse(body);
@@ -108,7 +95,7 @@ adminRoute.put("/admin/mappings/:id", async (c) => {
   return c.json({ mapping });
 });
 
-adminRoute.delete("/admin/mappings/:id", async (c) => {
+adminRoute.delete("/api/admin/mappings/:id", async (c) => {
   const id = c.req.param("id");
   const deleted = await deleteMapping(c.env.DB, id);
   if (!deleted) return c.json({ error: "Not found" }, 404);
@@ -117,7 +104,7 @@ adminRoute.delete("/admin/mappings/:id", async (c) => {
 
 // ---- Status ----
 
-adminRoute.get("/admin/status", async (c) => {
+adminRoute.get("/api/admin/status", async (c) => {
   const statuses = await listDestinationStatuses(c.env.DB);
   return c.json({ statuses });
 });
@@ -149,7 +136,7 @@ function buildSampleHttpRequestRecord() {
   };
 }
 
-adminRoute.post("/admin/test-send", async (c) => {
+adminRoute.post("/api/admin/test-send", async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = TestSendInputSchema.safeParse(body);
   if (!parsed.success) {

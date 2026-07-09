@@ -8,14 +8,14 @@ export const ingestRoute = new Hono<{ Bindings: Env }>();
 
 const QUEUE_BATCH_SIZE = 50;
 
-ingestRoute.use("/ingest/*", bearerAuth("INGEST_SECRET"));
+ingestRoute.use("/api/ingest/*", bearerAuth("INGEST_SECRET"));
 
 /**
  * Logpush HTTP destination endpoint. Configure a Logpush job with:
- *   destination_conf = "https://<worker>/ingest/<dataset>?header_Authorization=Bearer%20<INGEST_SECRET>"
+ *   destination_conf = "https://<worker>/api/ingest/<dataset>?header_Authorization=Bearer%20<INGEST_SECRET>"
  * See README.md for the full job creation example.
  */
-ingestRoute.post("/ingest/:dataset", async (c) => {
+ingestRoute.post("/api/ingest/:dataset", async (c) => {
   const dataset = c.req.param("dataset");
 
   const destinations = await listEnabledDestinationsForDataset(c.env.DB, dataset);

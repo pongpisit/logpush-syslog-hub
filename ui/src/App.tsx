@@ -8,7 +8,7 @@ import { Mappings } from "./components/Mappings.js";
 type Tab = "dashboard" | "destinations" | "mappings";
 
 export default function App() {
-  const [connected, setConnected] = useState(() => Boolean(getSettings().apiBase));
+  const [connected, setConnected] = useState(() => Boolean(getSettings().adminSecret));
   const [tab, setTab] = useState<Tab>("dashboard");
 
   if (!connected) {
@@ -20,7 +20,6 @@ export default function App() {
       <header className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-tangerine">Logpush Syslog Hub</h1>
-          <p className="text-xs text-slate-500">{getSettings().apiBase}</p>
         </div>
         <button
           className="link"

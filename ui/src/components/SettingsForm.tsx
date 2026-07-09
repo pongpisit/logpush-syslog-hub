@@ -3,7 +3,6 @@ import { getSettings, saveSettings } from "../api.js";
 
 export function SettingsForm({ onSaved }: { onSaved: () => void }) {
   const initial = getSettings();
-  const [apiBase, setApiBase] = useState(initial.apiBase);
   const [adminSecret, setAdminSecret] = useState(initial.adminSecret);
 
   return (
@@ -11,24 +10,15 @@ export function SettingsForm({ onSaved }: { onSaved: () => void }) {
       className="mx-auto mt-16 max-w-md space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-lg"
       onSubmit={(e) => {
         e.preventDefault();
-        saveSettings(apiBase, adminSecret);
+        saveSettings(adminSecret);
         onSaved();
       }}
     >
       <h1 className="text-lg font-semibold text-tangerine">Logpush Syslog Hub</h1>
       <p className="text-sm text-slate-400">
-        Connect to your deployed Worker to manage syslog destinations and CEF mappings.
+        Enter the <code>ADMIN_SECRET</code> you set for this Worker to manage syslog destinations
+        and CEF mappings.
       </p>
-      <div>
-        <label className="mb-1 block text-sm text-slate-300">API base URL</label>
-        <input
-          className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:border-tangerine"
-          placeholder="https://logpush-syslog-hub.<account>.workers.dev"
-          value={apiBase}
-          onChange={(e) => setApiBase(e.target.value)}
-          required
-        />
-      </div>
       <div>
         <label className="mb-1 block text-sm text-slate-300">Admin secret</label>
         <input

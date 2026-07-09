@@ -3,13 +3,15 @@
 Turn **Cloudflare Logpush** into a generic **syslog (CEF over TCP)** feed for
 any log collector — Splunk, QRadar, Elastic, Graylog, rsyslog, syslog-ng, or
 literally anything that can listen on a TCP port. Point Logpush at this
-Worker, add a destination in the web UI, and your logs start flowing as
-standard CEF syslog. No custom parser required on the receiving end.
+Worker, add a destination in the built-in web UI, and your logs start
+flowing as standard CEF syslog. No custom parser required on the receiving
+end.
 
+- ✅ **Single Worker** — the ingest API, admin API, and web UI are all one
+  Cloudflare Worker deployment. One URL, one "Deploy to Cloudflare" button.
 - ✅ **Generic CEF output** — standard extension keys (`src`, `dhost`,
   `request`, `cs1-6`, `cn1-3`, …) that any CEF-aware syslog receiver already
   understands
-- ✅ **Web UI** — add/edit destinations and field mappings without touching code
 - ✅ **Multiple destinations** — fan a single Logpush job out to as many
   syslog servers as you want, each with its own mapping
 - ✅ **Reliable delivery** — backed by a Cloudflare Queue with automatic
@@ -24,26 +26,18 @@ standard CEF syslog. No custom parser required on the receiving end.
 
 Click the button, and Cloudflare will fork this repo into your own
 GitHub/GitLab account, provision the D1 database and Queue automatically,
-and deploy. No local clone, no `wrangler` CLI required.
+build the web UI, and deploy — all as one Worker. No local clone, no
+`wrangler` CLI required.
 
-**1. Deploy the API** (this is the important one — it does the actual log forwarding):
-
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/pongpisit/logpush-syslog-hub/tree/main/apps/api)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/pongpisit/logpush-syslog-hub)
 
 You'll be prompted to enter two values during setup — `INGEST_SECRET` and
 `ADMIN_SECRET` (generate each with `openssl rand -hex 32`). Everything else
-(the D1 database, the Queue + dead-letter queue, and the database schema
-migration) is created and applied automatically.
+(the D1 database, the Queue + dead-letter queue, the database schema
+migration, and the web UI build) is created and applied automatically.
 
-**2. Deploy the web UI** (optional but recommended — lets you manage
-destinations without the CLI):
-
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/pongpisit/logpush-syslog-hub/tree/main/apps/web)
-
-No inputs needed for this one — it's a static site with no bindings.
-
-Once both are deployed, jump straight to [Part 2 — How to use
-it](#part-2--how-to-use-it) to add your first destination.
+Once deployed, jump straight to [Part 2 — How to use it](#part-2--how-to-use-it)
+to add your first destination.
 
 > Prefer the command line, want to run it locally first, or forking to make
 > changes? Use the manual steps in [Part 1](#part-1--deploy-your-own-instance-manual) instead.
@@ -69,23 +63,31 @@ it](#part-2--how-to-use-it) to add your first destination.
 Cloudflare Logpush
   │ POST gzip NDJSON, Authorization: Bearer <INGEST_SECRET>
   ▼
-Worker (apps/api) ── /ingest/:dataset ──▶ Cloudflare Queue
-  │                                            │
-  │ /admin/* (CRUD, D1)                        ▼
-  ▼                                   Queue consumer
-Web UI (apps/web)                       │ formats CEF syslog message
-  reads/writes D1 via /admin/*          ▼
-                                   TCP socket (direct or Workers VPC)
-                                         │
-                                         ▼
-                                 Your syslog server / SIEM
+                    ┌─── one Worker ───────────────────────────┐
+                    │                                          │
+  /api/ingest/:dataset ──▶ Cloudflare Queue                    │
+                    │            │                             │
+  /api/admin/* (CRUD, D1)        ▼                             │
+                    │      Queue consumer                      │
+  /* (everything else)     formats CEF syslog message          │
+    → serves the web UI          │                             │
+    (static assets)              ▼                             │
+                    │      TCP socket (direct or Workers VPC)  │
+                    └────────────┼───────────────────────────  ┘
+                                  ▼
+                          Your syslog server / SIEM
 ```
 
-1. Cloudflare Logpush POSTs a gzip-compressed NDJSON batch to `/ingest/:dataset`.
-2. The Worker authenticates the request, decompresses and parses each record,
-   and enqueues one delivery per destination configured for that dataset.
+1. Cloudflare Logpush POSTs a gzip-compressed NDJSON batch to
+   `/api/ingest/:dataset`.
+2. The Worker authenticates the request, decompresses and parses each
+   record, and enqueues one delivery per destination configured for that
+   dataset.
 3. A queue consumer formats each record as a CEF syslog message and opens a
    TCP connection to the destination, retrying automatically on failure.
+4. The same Worker also serves the web UI (a React SPA built to `./dist`)
+   for any request that isn't under `/api/*` — same origin, no CORS, no
+   separate deployment.
 
 ### Why CEF?
 
@@ -100,17 +102,16 @@ mappings for any other Logpush dataset from the web UI.
 ### Repo layout
 
 ```
-apps/api/  Hono Worker: ingest endpoint, admin API, queue consumer, D1 schema.
-           Fully self-contained (no external workspace dependency) so it can
-           be deployed standalone via the "Deploy to Cloudflare" button.
-apps/web/  React + Vite + Tailwind admin UI (destinations, mappings, dashboard).
-           Also fully self-contained; a static site with no bindings.
+src/   Hono Worker: ingest endpoint, admin API, queue consumer, D1 schema.
+ui/    React + Vite + Tailwind admin UI (destinations, mappings, dashboard).
+       Built by `npm run build` into ./dist, which the Worker serves via
+       its `assets` binding (see wrangler.jsonc) — not a separate deploy.
+test/  Vitest test suite (@cloudflare/vitest-pool-workers).
 ```
 
-Both apps keep their own copy of the shared data types
-(`apps/api/src/shared/`, `apps/web/src/types.ts`) instead of a shared
-workspace package — Cloudflare's Deploy to Cloudflare button requires each
-Worker's subdirectory to be fully isolated, including its dependencies.
+Everything ships as **one Worker**: API routes live under `/api/*`; every
+other request falls through to the built web UI (see `src/index.ts` and the
+`assets` block in `wrangler.jsonc`).
 
 ---
 
@@ -118,7 +119,7 @@ Worker's subdirectory to be fully isolated, including its dependencies.
 
 This is the command-line path — use it if you want to run the project
 locally, make changes before deploying, or just prefer the CLI over the
-[Deploy to Cloudflare buttons](#deploy-to-cloudflare) above. This is a
+[Deploy to Cloudflare button](#deploy-to-cloudflare) above. This is a
 **one-time setup** you (or whoever runs the infrastructure) do once. If
 someone has already deployed this for you, skip straight to
 [Part 2 — How to use it](#part-2--how-to-use-it).
@@ -142,15 +143,13 @@ pnpm install
 ### Step 2 — Create the Cloudflare resources
 
 ```bash
-cd apps/api
 npx wrangler d1 create logpush-syslog-hub-db
 npx wrangler queues create logpush-syslog-queue
 npx wrangler queues create logpush-syslog-queue-dlq
 ```
 
-The first command prints a `database_id`. Copy it into
-`apps/api/wrangler.jsonc` under `d1_databases[0].database_id`, replacing the
-placeholder value.
+The first command prints a `database_id`. Copy it into `wrangler.jsonc`
+under `d1_databases[0].database_id`, replacing the placeholder value.
 
 ### Step 3 — Set two secrets
 
@@ -166,41 +165,27 @@ openssl rand -hex 32
 ```
 
 Save both values somewhere safe (e.g. a password manager); you'll need
-`ADMIN_SECRET` again in the next step, and `INGEST_SECRET` again when you
-[create the Logpush job](#c-create-the-logpush-job) in Part 2.
+`ADMIN_SECRET` again when you open the web UI, and `INGEST_SECRET` again
+when you [create the Logpush job](#c-create-the-logpush-job) in Part 2.
 
-> For local development instead of a live deploy, copy
-> `apps/api/.dev.vars.example` to `apps/api/.dev.vars` and put test values
-> there (this file is git-ignored and never committed).
+> For local development instead of a live deploy, copy `.dev.vars.example`
+> to `.dev.vars` and put test values there (this file is git-ignored and
+> never committed).
 
-### Step 4 — Deploy the API and the web UI
+### Step 4 — Deploy
 
 ```bash
-# Deploy the API — this also applies D1 migrations automatically, creating
-# the destinations/mappings/destination_status tables and seeding two
-# ready-to-use generic CEF mappings. Note the URL it prints, e.g.
-# https://logpush-syslog-hub.<you>.workers.dev
-pnpm --filter @logpush-syslog-hub/api deploy
-
-# Build and deploy the web UI
-cd ../web
-pnpm build
-npx wrangler deploy
+# Builds the web UI into ./dist, applies D1 migrations (creating the
+# destinations/mappings/destination_status tables and seeding two
+# ready-to-use generic CEF mappings), then deploys the Worker. Note the URL
+# it prints, e.g. https://logpush-syslog-hub.<you>.workers.dev
+npm run deploy
 ```
 
-The second command also prints a URL, e.g.
-`https://logpush-syslog-hub-web.<you>.workers.dev`. Open it in a browser.
-
-On first load you'll see a connection screen — enter:
-
-| Field | Value |
-|---|---|
-| **API base URL** | the API URL from the first deploy command above |
-| **Admin secret** | the `ADMIN_SECRET` value you set in Step 3 |
-
-Click **Connect**. You should land on the Dashboard, showing a green
-"status: ok" badge. Deployment is done — move on to Part 2 to start
-forwarding logs.
+Open the printed URL in a browser. On first load you'll see a connection
+screen — enter the `ADMIN_SECRET` value you set in Step 3, then click
+**Connect**. You should land on the Dashboard, showing a green "status: ok"
+badge. Deployment is done — move on to Part 2 to start forwarding logs.
 
 ---
 
@@ -249,7 +234,7 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/logpush/jobs" 
   -H "Content-Type: application/json" \
   -d '{
     "name": "syslog-hub-http-requests",
-    "destination_conf": "https://<your-worker>.workers.dev/ingest/http_requests?header_Authorization=Bearer%20<INGEST_SECRET>",
+    "destination_conf": "https://<your-worker>.workers.dev/api/ingest/http_requests?header_Authorization=Bearer%20<INGEST_SECRET>",
     "dataset": "http_requests",
     "output_options": {
       "field_names": [
@@ -266,7 +251,7 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/logpush/jobs" 
 
 A successful response includes `"success": true` and a job `"id"`. To also
 forward firewall events, repeat the command with
-`"dataset": "firewall_events"` and `/ingest/firewall_events` in the URL.
+`"dataset": "firewall_events"` and `/api/ingest/firewall_events` in the URL.
 
 > **Note the URL encoding:** the `header_Authorization` value must be
 > `Bearer%20<INGEST_SECRET>` — that's the literal word `Bearer`, then `%20`
@@ -312,7 +297,7 @@ add support for another Logpush dataset:
 | Private / on-prem | `vpc` — reach it through a [Workers VPC Network](https://developers.cloudflare.com/workers-vpc/configuration/vpc-networks/) bound to a Cloudflare Tunnel or Mesh network. |
 
 To enable `vpc` transport, uncomment and configure the `vpc_networks` block
-in `apps/api/wrangler.jsonc`, then redeploy the API:
+in `wrangler.jsonc`, then redeploy:
 
 ```jsonc
 "vpc_networks": [
@@ -344,37 +329,49 @@ length-prefixed framing (check its docs for "octet counting" or "RFC 6587").
 
 ## Local development
 
-Try the whole pipeline locally in under a minute — useful for testing before
-you touch a real syslog server:
+Two terminals — one runs the Worker (API + queue consumer), the other runs
+the web UI with hot reload, proxying `/api/*` calls to the Worker:
 
 ```bash
-# Terminal 1: a plain TCP listener to see the output
+# Terminal 1: the Worker (build the UI once first so wrangler's assets
+# binding has something to serve; the API works fine without rebuilding
+# it again on every UI change since Terminal 2 has its own dev server)
+npm run build
+npm run dev:worker      # http://localhost:8787
+
+# Terminal 2: the web UI with Vite HMR, proxying /api to :8787
+npm run dev:ui          # http://localhost:5173
+```
+
+Open `http://localhost:5173` for UI development with hot reload, or
+`http://localhost:8787` to hit the Worker directly (serving the last build).
+
+Try the ingest pipeline end-to-end locally:
+
+```bash
+# Terminal 3: a plain TCP listener to see the output
 nc -lk 1514 | cat
 
-# Terminal 2: run the Worker locally
-cd apps/api
-npx wrangler dev
-
-# Terminal 3: add a destination pointing at 127.0.0.1:1514 (transport=direct,
-# framing=newline) via the web UI pointed at http://localhost:8787, or call
-# the admin API directly — then send a sample Logpush-shaped payload:
+# Add a destination pointing at 127.0.0.1:1514 (transport=direct,
+# framing=newline) via the web UI at http://localhost:5173, then send a
+# sample Logpush-shaped payload:
 printf '{"RayID":"test001","EdgeStartTimestamp":1720000000000000000,"ClientIP":"203.0.113.1","ClientCountry":"TH","ClientSrcPort":54321,"ClientRequestMethod":"GET","ClientRequestHost":"example.com","ClientRequestURI":"/api/v1/data","ClientRequestProtocol":"HTTP/2","ClientRequestUserAgent":"Mozilla/5.0","ClientSSLProtocol":"TLSv1.3","EdgeResponseStatus":200,"EdgeResponseBytes":4096,"EdgeColoCode":"SIN","EdgeTimeToFirstByteMs":18,"CacheCacheStatus":"MISS","ZoneName":"example.com"}' \
   | gzip \
-  | curl -s -X POST http://localhost:8787/ingest/http_requests \
-       -H "Authorization: Bearer $(grep INGEST_SECRET apps/api/.dev.vars | cut -d= -f2)" \
+  | curl -s -X POST http://localhost:8787/api/ingest/http_requests \
+       -H "Authorization: Bearer $(grep INGEST_SECRET .dev.vars | cut -d= -f2)" \
        -H "Content-Encoding: gzip" \
        --data-binary @-
 ```
 
-You should see a CEF syslog line appear in Terminal 1 within a couple of
+You should see a CEF syslog line appear in Terminal 3 within a couple of
 seconds.
 
 ### Running the test suite
 
 ```bash
-pnpm -r typecheck
-pnpm --filter @logpush-syslog-hub/api test              # ~52 tests, ~90% coverage
-pnpm --filter @logpush-syslog-hub/api test -- --coverage
+npm run typecheck
+npm test              # builds the UI, then ~52 tests, ~90% coverage
+npm test -- --coverage
 ```
 
 ---
@@ -388,8 +385,8 @@ pnpm --filter @logpush-syslog-hub/api test -- --coverage
 - **Messages look truncated or merged together** — try switching the
   destination's **Framing** setting (see [above](#framing-which-one-do-i-pick)).
 - **`vpc` transport fails immediately** — make sure the `vpc_networks` block
-  in `apps/api/wrangler.jsonc` is uncommented, configured with a real tunnel
-  ID, and that you've redeployed after changing it.
+  in `wrangler.jsonc` is uncommented, configured with a real tunnel ID, and
+  that you've redeployed after changing it.
 - **Logpush job creation fails with a destination validation error** — the
   ingest endpoint must respond `2xx` to Logpush's ownership check; make sure
   `INGEST_SECRET` in the job's `header_Authorization` matches the deployed
@@ -410,8 +407,8 @@ pnpm --filter @logpush-syslog-hub/api test -- --coverage
 
 ## Contributing
 
-Issues and PRs welcome. Please run `pnpm -r typecheck` and
-`pnpm --filter @logpush-syslog-hub/api test` before submitting.
+Issues and PRs welcome. Please run `npm run typecheck` and `npm test`
+before submitting.
 
 ## License
 

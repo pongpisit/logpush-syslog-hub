@@ -7,9 +7,9 @@ async function gzip(text: string): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-describe("POST /ingest/:dataset", () => {
+describe("POST /api/ingest/:dataset", () => {
   it("acks with zero enqueued when no destination matches the dataset", async () => {
-    const res = await SELF.fetch("https://example.com/ingest/no_such_dataset", {
+    const res = await SELF.fetch("https://example.com/api/ingest/no_such_dataset", {
       method: "POST",
       headers: { Authorization: `Bearer ${env.INGEST_SECRET}` },
       body: "{}",
@@ -38,7 +38,7 @@ describe("POST /ingest/:dataset", () => {
     ].join("\n");
     const body = await gzip(ndjson);
 
-    const res = await SELF.fetch("https://example.com/ingest/http_requests", {
+    const res = await SELF.fetch("https://example.com/api/ingest/http_requests", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${env.INGEST_SECRET}`,
@@ -71,7 +71,7 @@ describe("POST /ingest/:dataset", () => {
     const ndjson = ['not-json', JSON.stringify({ RayID: "r3", Action: "block" })].join("\n");
     const body = await gzip(ndjson);
 
-    const res = await SELF.fetch("https://example.com/ingest/firewall_events", {
+    const res = await SELF.fetch("https://example.com/api/ingest/firewall_events", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${env.INGEST_SECRET}`,

@@ -1,9 +1,9 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-describe("GET /health", () => {
+describe("GET /api/health", () => {
   it("returns ok status with a timestamp", async () => {
-    const res = await SELF.fetch("https://example.com/health");
+    const res = await SELF.fetch("https://example.com/api/health");
     expect(res.status).toBe(200);
     const body = await res.json<{ status: string; timestamp: string; bindings: unknown }>();
     expect(body.status).toBe("ok");
