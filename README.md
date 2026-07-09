@@ -132,13 +132,28 @@ Select it on any destination.
 
 For a quick PoC, this sets up `rsyslog` on a fresh Debian box (or container)
 to listen on TCP and write anything that looks like our CEF output to its
-own file. Paste the whole block into a root shell:
+own file.
+
+> **Why this version doesn't die when you disconnect:** an earlier version
+> of this script piped straight into an interactive `docker run -it bash`
+> and ended with a blocking `tail -f`. Both are fragile — a container's
+> whole process tree dies the instant its PID 1 exits (an interactive
+> `bash` has no init system to keep other processes alive), and a script
+> that ends by blocking on a live terminal makes any SSH drop or closed
+> pane look like the whole setup failed. The version below runs the setup
+> as a one-shot command against a container whose PID 1 is a stable
+> no-op (`sleep infinity`) — daemonized processes like `rsyslogd` get
+> reparented to it and keep running no matter what happens to your
+> terminal — and watching the logs is a separate, reconnect-anytime step.
+
+**On a real Debian/Ubuntu VM (via SSH),** paste this as whatever user you're
+logged in as (e.g. the default `ubuntu` user) — it elevates itself with
+`sudo` for the privileged parts, so you don't need to `sudo -i` first.
+`rsyslog` runs under systemd, so it's already independent of your SSH
+session once installed:
 
 ```bash
-#!/usr/bin/env bash
-# Disposable syslog receiver for testing logpush-syslog-hub end-to-end.
-# Run as root on Debian 11/12, or inside a throwaway container:
-#   docker run --rm -it -p 1514:1514 debian:12 bash
+sudo bash <<'ROOTSCRIPT'
 set -euo pipefail
 
 PORT=1514
@@ -160,18 +175,51 @@ EOF
 
 touch "$LOGFILE"
 chmod 640 "$LOGFILE"
+systemctl enable rsyslog
+systemctl restart rsyslog
 
-# Real VM (systemd) vs. a plain `docker run debian` container (no systemd)
-if command -v systemctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1; then
-  systemctl enable rsyslog
-  systemctl restart rsyslog
-else
-  pkill rsyslogd 2>/dev/null || true
-  rsyslogd
-fi
+echo "Done. rsyslog is running under systemd — it'll keep running even if this session disconnects."
+echo "Watch logs any time with: sudo tail -f ${LOGFILE}"
+ROOTSCRIPT
+```
 
-echo "Listening on TCP ${PORT}. Watching ${LOGFILE} — Ctrl+C to stop watching (rsyslog keeps running):"
-tail -f "$LOGFILE"
+> `sudo bash <<'ROOTSCRIPT' ... ROOTSCRIPT` runs the whole block as root in
+> one go, so `apt-get`, writing to `/etc/rsyslog.d/`, and `systemctl` all
+> succeed regardless of which user pasted it in. If you skip this and paste
+> the inner body directly as a non-root user instead, you'll hit `Permission
+> denied` writing to `/etc/rsyslog.d/` — `set -e` then aborts the script
+> right there (that's a normal, if abrupt, way for a script to fail; it's
+> not related to disconnects).
+
+**In a throwaway Docker container instead,** start it detached first so it
+survives disconnects, then run setup as a one-shot `exec` — nothing here
+blocks or depends on your terminal staying open:
+
+```bash
+# 1. A container whose only job is to stay alive (survives any disconnect)
+docker run -d --name logpush-poc -p 1514:1514 debian:12 sleep infinity
+
+# 2. Install and configure rsyslog inside it — safe to lose your
+#    connection the moment this command returns
+docker exec logpush-poc bash -c '
+set -euo pipefail
+apt-get update -y
+apt-get install -y rsyslog
+cat > /etc/rsyslog.d/10-logpush-syslog-hub.conf <<EOF
+module(load="imtcp")
+input(type="imtcp" port="1514")
+if \$msg contains "CEF:0|" then {
+    action(type="omfile" file="/var/log/logpush-syslog-hub.log")
+    stop
+}
+EOF
+touch /var/log/logpush-syslog-hub.log
+rsyslogd
+echo "rsyslogd is running, reparented to this container'"'"'s PID 1 — it will survive even if this exec session disconnects."
+'
+
+# 3. Watch logs any time — reconnect and rerun this as often as you like
+docker exec -it logpush-poc tail -f /var/log/logpush-syslog-hub.log
 ```
 
 Then, back in the web UI, add a destination pointing at it:
