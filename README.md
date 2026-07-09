@@ -69,7 +69,7 @@ In the web UI, go to **Destinations → + Add destination**:
 | Field | What to enter |
 |---|---|
 | Name | A friendly label, e.g. `Production SIEM` |
-| Host / Port | Your syslog server's address, e.g. `10.0.0.5` / `514` |
+| Host / Port | Your syslog server's address, e.g. `10.0.0.5` / `514`. Don't have one yet? [Spin up a disposable one on Debian](#dont-have-a-syslog-server-yet-spin-up-a-disposable-one-on-debian) in under a minute. |
 | Transport | `Direct` for a public IP, `Workers VPC` for a private one — see [below](#connecting-to-a-private-syslog-server) |
 | Framing | See [Framing](#framing-which-one-do-i-pick) if unsure — `newline` is the safe default |
 | Dataset | Which Logpush dataset to receive: `http_requests`, `firewall_events`, or `all` |
@@ -125,6 +125,73 @@ Go to **Mappings → + Add mapping**, set **Dataset** to any Logpush dataset
 name (e.g. `dns_logs`), then add rows mapping a **cefKey** (e.g. `src`) to
 either a **sourceField** (a Logpush field name) or a fixed **staticValue**.
 Select it on any destination.
+
+---
+
+## Don't have a syslog server yet? Spin up a disposable one on Debian
+
+For a quick PoC, this sets up `rsyslog` on a fresh Debian box (or container)
+to listen on TCP and write anything that looks like our CEF output to its
+own file. Paste the whole block into a root shell:
+
+```bash
+#!/usr/bin/env bash
+# Disposable syslog receiver for testing logpush-syslog-hub end-to-end.
+# Run as root on Debian 11/12, or inside a throwaway container:
+#   docker run --rm -it -p 1514:1514 debian:12 bash
+set -euo pipefail
+
+PORT=1514
+LOGFILE=/var/log/logpush-syslog-hub.log
+
+apt-get update -y
+apt-get install -y rsyslog
+
+cat > /etc/rsyslog.d/10-logpush-syslog-hub.conf <<EOF
+module(load="imtcp")
+input(type="imtcp" port="${PORT}")
+
+# Anything with our CEF header goes to its own file instead of syslog/messages
+if \$msg contains "CEF:0|" then {
+    action(type="omfile" file="${LOGFILE}")
+    stop
+}
+EOF
+
+touch "$LOGFILE"
+chmod 640 "$LOGFILE"
+
+# Real VM (systemd) vs. a plain `docker run debian` container (no systemd)
+if command -v systemctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1; then
+  systemctl enable rsyslog
+  systemctl restart rsyslog
+else
+  pkill rsyslogd 2>/dev/null || true
+  rsyslogd
+fi
+
+echo "Listening on TCP ${PORT}. Watching ${LOGFILE} — Ctrl+C to stop watching (rsyslog keeps running):"
+tail -f "$LOGFILE"
+```
+
+Then, back in the web UI, add a destination pointing at it:
+
+| Field | Value |
+|---|---|
+| Host | This box's IP (`hostname -I`), or `127.0.0.1` if testing against `wrangler dev` locally |
+| Port | `1514` |
+| Transport | `Direct` |
+| Framing | `newline` (rsyslog's `imtcp` also auto-detects `rfc6587`, so either works) |
+
+Click **Test send** — a CEF line should appear immediately in the `tail -f`
+terminal from the script above.
+
+> **Reachability matters:** a **deployed** Worker sends TCP from Cloudflare's
+> network, so the receiver needs a **public** IP with the port open (cloud
+> firewall / security group, not just `ufw`). Testing against `wrangler dev`
+> instead? Use `127.0.0.1` — everything runs on your machine. For a private
+> receiver with no public IP, use `Workers VPC` — see
+> [below](#connecting-to-a-private-syslog-server).
 
 ---
 
