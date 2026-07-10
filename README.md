@@ -206,7 +206,7 @@ session once installed:
 sudo bash <<'ROOTSCRIPT'
 set -euo pipefail
 
-PORT=1514
+PORT=514  # <1024, needs root to bind — already covered by `sudo bash` above
 LOGFILE=/var/log/logpush-syslog-hub.log
 
 apt-get update -y
@@ -247,7 +247,7 @@ blocks or depends on your terminal staying open:
 
 ```bash
 # 1. A container whose only job is to stay alive (survives any disconnect)
-docker run -d --name logpush-poc -p 1514:1514 debian:12 sleep infinity
+docker run -d --name logpush-poc -p 514:514 debian:12 sleep infinity
 
 # 2. Install and configure rsyslog inside it — safe to lose your
 #    connection the moment this command returns
@@ -257,7 +257,7 @@ apt-get update -y
 apt-get install -y rsyslog
 cat > /etc/rsyslog.d/10-logpush-syslog-hub.conf <<EOF
 module(load="imtcp")
-input(type="imtcp" port="1514")
+input(type="imtcp" port="514")
 if \$msg contains "CEF:0|" then {
     action(type="omfile" file="/var/log/logpush-syslog-hub.log")
     stop
@@ -277,7 +277,7 @@ Then, back in the web UI, add a destination pointing at it:
 | Field | Value |
 |---|---|
 | Host | This box's IP (`hostname -I`), or `127.0.0.1` if testing against `wrangler dev` locally |
-| Port | `1514` |
+| Port | `514` |
 | Transport | `Direct` |
 | Framing | `newline` (rsyslog's `imtcp` also auto-detects `rfc6587`, so either works) |
 
