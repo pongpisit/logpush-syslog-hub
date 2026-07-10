@@ -107,11 +107,32 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/logpush/jobs" 
 
 A response with `"success": true` means it's live — logs should start
 arriving within a minute or two. To also forward firewall events, repeat
-with `"dataset": "firewall_events"` and `/api/ingest/firewall_events`.
+with this `field_names` list, `"dataset": "firewall_events"`, and
+`/api/ingest/firewall_events`:
+
+```json
+"output_options": {
+  "field_names": [
+    "RayID","Datetime","ClientIP","ClientCountry","ClientRequestHost",
+    "ClientRequestPath","ClientRequestMethod","ClientRequestUserAgent",
+    "ClientRequestQuery","EdgeColoCode","EdgeResponseStatus","ZoneName",
+    "Action","RuleID","Source"
+  ],
+  "timestamp_format": "unixnano"
+}
+```
 
 > ⚠️ **Common mistake:** `header_Authorization` must be exactly
 > `Bearer%20<INGEST_SECRET>` — the word `Bearer`, a URL-encoded space
 > (`%20`), then your secret. Get this wrong and the job fails to create.
+>
+> ⚠️ **`field_names` must match your CEF mapping exactly.** Logpush has no
+> "send all fields" option — whatever you omit from `field_names` arrives
+> as `null` in that record, and this Worker's default CEF mappings
+> (`src/shared/cef-defaults.ts`) reference the exact field names above. If
+> you're using a custom mapping, open it in the **Mappings** tab of the web
+> UI — it now shows the exact `field_names` your mapping needs, with a
+> **Copy JSON** button, so this never drifts out of sync.
 
 ### 3. Watch it work
 

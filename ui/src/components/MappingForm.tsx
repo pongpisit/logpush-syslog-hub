@@ -3,6 +3,25 @@ import type { Mapping, MappingInput, MappingRule } from "../types.js";
 
 const EMPTY_RULE: MappingRule = { cefKey: "", sourceField: "" };
 
+// Mirrors the timestamp candidates in ../../src/services/cef.ts (buildCefMessage).
+// Any one of these present in a Logpush record is used to populate CEF's `rt`.
+const TIMESTAMP_FIELD_CANDIDATES = ["EdgeStartTimestamp", "Datetime", "Timestamp", "EdgeEndTimestamp"];
+
+/**
+ * Every `sourceField` referenced by this mapping's rules, plus a reminder to
+ * include a timestamp field — this is exactly the `output_options.field_names`
+ * array the matching Logpush job needs. Logpush has no "send all fields"
+ * option, so a job missing any of these will silently produce `null`/empty
+ * CEF extensions for that field.
+ */
+function requiredLogpushFields(rules: MappingRule[]): string[] {
+  const fields = new Set<string>();
+  for (const rule of rules) {
+    if (rule.sourceField?.trim()) fields.add(rule.sourceField.trim());
+  }
+  return [...fields];
+}
+
 export function MappingForm({
   initial,
   onSubmit,
@@ -17,6 +36,10 @@ export function MappingForm({
   const [rules, setRules] = useState<MappingRule[]>(initial?.rules?.length ? initial.rules : [EMPTY_RULE]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const requiredFields = requiredLogpushFields(rules);
+  const fieldNamesJson = JSON.stringify(requiredFields, null, 2);
 
   const updateRule = (index: number, patch: Partial<MappingRule>) => {
     setRules((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -105,6 +128,30 @@ export function MappingForm({
           ))}
         </div>
       </div>
+
+      {requiredFields.length > 0 && (
+        <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-slate-400">
+          <div className="mb-1 flex items-center justify-between">
+            <span>
+              Required Logpush <code className="text-slate-300">output_options.field_names</code> — the Logpush job for
+              this mapping must request exactly these fields (there is no "send all fields" option), plus one
+              timestamp field: <code className="text-slate-300">{TIMESTAMP_FIELD_CANDIDATES.join(", ")}</code>.
+            </span>
+            <button
+              type="button"
+              className="link shrink-0 whitespace-nowrap"
+              onClick={async () => {
+                await navigator.clipboard.writeText(fieldNamesJson);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+            >
+              {copied ? "Copied!" : "Copy JSON"}
+            </button>
+          </div>
+          <pre className="overflow-x-auto rounded bg-slate-900 p-2 text-slate-300">{fieldNamesJson}</pre>
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 

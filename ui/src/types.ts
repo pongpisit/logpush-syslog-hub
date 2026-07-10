@@ -1,8 +1,7 @@
-// Plain TypeScript mirrors of the API's data shapes (apps/api/src/shared/schemas.ts).
-// Duplicated here (rather than imported from a shared workspace package) so
-// this app has no pnpm-workspace dependency and can be deployed standalone
-// from this subdirectory via the Cloudflare "Deploy to Cloudflare" button.
-// Keep in sync with apps/api/src/shared/schemas.ts if you change these shapes.
+// Plain TypeScript mirrors of the Worker's data shapes (../../src/shared/schemas.ts).
+// Duplicated here (rather than imported directly) so this Vite app's build
+// stays isolated from the Worker's tsconfig/module graph.
+// Keep in sync with ../../src/shared/schemas.ts if you change these shapes.
 
 export type Transport = "vpc" | "direct";
 export type Frame = "rfc6587" | "newline";
