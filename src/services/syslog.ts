@@ -13,6 +13,17 @@ export interface VpcNetworkBinding {
 export class SyslogDeliveryError extends Error {}
 
 /**
+ * `cloudflare:sockets` connect() is lazy: it returns a Socket immediately,
+ * and the actual TCP handshake only happens on the first write/read. If the
+ * destination silently drops packets (no listener, firewall blackhole — no
+ * RST, so it's not a fast failure) that first write's promise can hang far
+ * longer than is useful, both for the interactive "Test send" button and for
+ * the queue consumer delivering real batches. There is no per-connect
+ * timeout option in the sockets API, so this wraps the whole send in one.
+ */
+const DEFAULT_DELIVERY_TIMEOUT_MS = 8_000;
+
+/**
  * Frame a syslog message per the destination's chosen framing:
  *  - "rfc6587": octet-count prefix `"<byteLength> "` before the message.
  *  - "newline": the message followed by a trailing `\n`.
@@ -43,6 +54,7 @@ export async function sendSyslogMessage(
   destination: Pick<Destination, "host" | "port" | "transport" | "frame">,
   message: string,
   vpcBinding: VpcNetworkBinding | undefined,
+  timeoutMs = DEFAULT_DELIVERY_TIMEOUT_MS,
 ): Promise<void> {
   let socket: Socket;
   if (destination.transport === "vpc") {
@@ -60,13 +72,36 @@ export async function sendSyslogMessage(
     );
   }
 
-  const writer = socket.writable.getWriter();
-  try {
-    for (const chunk of frameMessage(message, destination.frame)) {
-      await writer.write(chunk);
+  const send = async () => {
+    const writer = socket.writable.getWriter();
+    try {
+      for (const chunk of frameMessage(message, destination.frame)) {
+        await writer.write(chunk);
+      }
+    } finally {
+      await writer.close().catch(() => undefined);
     }
+    await socket.closed.catch(() => undefined);
+  };
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new SyslogDeliveryError(
+          `Connection to ${destination.host}:${destination.port} timed out after ${timeoutMs}ms ` +
+            "(no response — check the host/port is reachable, listening on TCP, and not firewalled)",
+        ),
+      );
+    }, timeoutMs);
+  });
+
+  try {
+    await Promise.race([send(), timeout]);
   } finally {
-    await writer.close().catch(() => undefined);
+    clearTimeout(timer);
+    // On timeout, `send()` is still running against a socket nobody's
+    // waiting on anymore — close it so it doesn't leak past this invocation.
+    await socket.close().catch(() => undefined);
   }
-  await socket.closed.catch(() => undefined);
 }

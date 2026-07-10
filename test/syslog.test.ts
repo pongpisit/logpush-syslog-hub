@@ -44,6 +44,7 @@ describe("sendSyslogMessage", () => {
         }),
       },
       closed: Promise.resolve(undefined),
+      close: async () => undefined,
     };
     const vpcBinding = {
       connect: async (address: string) => {
@@ -60,5 +61,38 @@ describe("sendSyslogMessage", () => {
 
     const decoder = new TextDecoder();
     expect(written.map((c) => decoder.decode(c))).toEqual(["2 ", "hi"]);
+  });
+
+  it("times out instead of hanging forever when the destination never responds", async () => {
+    // Simulates a destination that silently drops packets (no listener, no
+    // RST) — the exact scenario that used to hang sendSyslogMessage
+    // indefinitely, blocking both "Test send" and the queue consumer.
+    let closed = false;
+    const neverResolvingSocket = {
+      writable: {
+        getWriter: () => ({
+          write: () => new Promise<void>(() => undefined), // never resolves
+          close: async () => undefined,
+        }),
+      },
+      closed: new Promise<void>(() => undefined),
+      close: async () => {
+        closed = true;
+      },
+    };
+    const vpcBinding = {
+      connect: async () => neverResolvingSocket as unknown as Socket,
+    };
+
+    await expect(
+      sendSyslogMessage(
+        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "newline" },
+        "hi",
+        vpcBinding,
+        50, // short timeout so the test itself doesn't hang
+      ),
+    ).rejects.toThrow(/timed out after 50ms/);
+
+    expect(closed).toBe(true);
   });
 });

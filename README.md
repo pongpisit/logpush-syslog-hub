@@ -134,6 +134,35 @@ with this `field_names` list, `"dataset": "firewall_events"`, and
 > UI — it now shows the exact `field_names` your mapping needs, with a
 > **Copy JSON** button, so this never drifts out of sync.
 
+#### Prefer the dashboard? Here's the same job, click by click
+
+1. Cloudflare dashboard → **Logpush** (account or zone level) → **Create a Logpush job**.
+2. **Select a destination** → **HTTP destination**.
+3. **HTTP endpoint** — paste the full URL, including the `?header_Authorization=...`
+   query string, exactly as generated above. Click **Continue**.
+4. **Dataset** — select `HTTP requests` (or `Firewall events`).
+5. **Job name** — anything you like.
+6. **If logs match** — leave as-is unless you want to filter which events get pushed.
+7. **Send the following fields** — this is the dashboard's version of
+   `output_options.field_names`. The dashboard's own default field set is
+   **not** the same list as above — switch to manual selection and pick
+   exactly the fields listed for your dataset, or fields will silently
+   arrive as empty in the CEF output.
+8. **Advanced Options** → **Timestamp format** — `RFC3339` (the dashboard
+   default) is fine; this Worker parses `unixnano`, `unix`, and RFC3339
+   timestamps automatically.
+9. **Submit**.
+
+> ⚠️ **Dashboard-specific gotcha:** the dashboard validates `destination_conf`
+> against the regex `^[a-zA-Z0-9\.,_:/?%+&=\{\}-]+$` — notably, **no literal
+> spaces**. The URL above already encodes its one space as `%20`
+> (three plain characters: `%`, `2`, `0`), which is valid. If you get
+> `invalid destination_conf: config string must match "..."`, something
+> along the way turned that `%20` back into a real space character — paste
+> the URL directly rather than retyping it. If the dashboard keeps mangling
+> it, the [API method](#2-point-a-logpush-job-at-it) above sidesteps this
+> entirely.
+
 ### 3. Watch it work
 
 The **Dashboard** tab shows, per destination: events forwarded, events
@@ -360,7 +389,9 @@ npm test              # builds the UI, then ~52 tests, ~90% coverage
 | Messages look truncated or merged | Switch the destination's [Framing](#framing-which-one-do-i-pick) setting. |
 | `Workers VPC` transport fails immediately | Confirm `vpc_networks` in `wrangler.jsonc` is uncommented with a real tunnel ID, and that you've redeployed since changing it. |
 | Logpush job creation fails: `Invalid destination configuration: error writing object: error uploading to https: status:405` | Your `destination_conf` URL is missing `/api/ingest/:dataset` — it's most likely pointing at the site root (or an old pre-merge `/ingest/...` path). Cloudflare validates every HTTP destination by POSTing a small test payload to the URL you gave it; anything outside `/api/*` is the web UI (GET/HEAD only), so a POST there is rejected. Fix the URL to `https://<your-worker>.workers.dev/api/ingest/<dataset>?header_Authorization=Bearer%20<INGEST_SECRET>` and try again. |
+| Dashboard rejects the job with `invalid destination_conf: config string must match "^[a-zA-Z0-9\.,_:/?%+&=\{\}-]+$"` | That regex has no literal space in its allowed characters. Your `header_Authorization=Bearer%20<SECRET>` query param must keep `%20` as the three literal characters `%`, `2`, `0` — if it got turned back into a real space (e.g. by retyping instead of pasting), this is the error you'll get. Paste the URL directly rather than retyping it; if the dashboard keeps mangling it, use the [API method](#2-point-a-logpush-job-at-it) instead. |
 | Logpush job creation fails with a different/other validation error | Double-check `INGEST_SECRET` matches exactly, including the URL-encoded `Bearer%20` prefix — the ingest endpoint must return `2xx` during Logpush's validation POST. |
+| **Test send** (or real delivery) fails with `Connection to <host>:<port> timed out after 8000ms` | The destination never responded to a TCP handshake — no listener, a firewall silently dropping packets, or (most common) the server only listens on **UDP**, not TCP, on that port. Cloudflare Workers can only open outbound **TCP** connections — there's no raw UDP support — so a syslog daemon configured for UDP-only on 514 will always time out here. Confirm the receiving daemon has a TCP listener on that port and that nothing between here and there blocks inbound TCP on it. |
 | Web UI shows "Unauthorized" | Your `ADMIN_SECRET` doesn't match what's deployed. Click **Disconnect** and re-enter it. |
 
 > **Heads up:** Cloudflare's destination validation sends one real POST with
