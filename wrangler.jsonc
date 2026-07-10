@@ -48,10 +48,9 @@
   // with transport="vpc" (private syslog servers reached through a
   // Cloudflare Tunnel or Cloudflare Mesh). connect() over VPC Networks is
   // plaintext TCP only. See README.md "Private destinations (Workers VPC)".
-  //
-  // "vpc_networks": [
-  //   { "binding": "SYSLOG_VPC", "tunnel_id": "<YOUR_TUNNEL_UUID>", "remote": true }
-  // ],
+  "vpc_networks": [
+    { "binding": "SYSLOG_VPC", "tunnel_id": "0cef3d06-80bd-414a-97c5-9b304af4cf81", "remote": true }
+  ],
 
   "vars": {
     "SYSLOG_HOSTNAME_DEFAULT": "cloudflare"

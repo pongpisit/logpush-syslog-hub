@@ -47,7 +47,7 @@ describe("sendSyslogMessage", () => {
       close: async () => undefined,
     };
     const vpcBinding = {
-      connect: async (address: string) => {
+      connect: (address: string) => {
         expect(address).toBe("10.0.0.1:514");
         return fakeSocket as unknown as Socket;
       },
@@ -81,7 +81,7 @@ describe("sendSyslogMessage", () => {
       },
     };
     const vpcBinding = {
-      connect: async () => neverResolvingSocket as unknown as Socket,
+      connect: () => neverResolvingSocket as unknown as Socket,
     };
 
     await expect(
