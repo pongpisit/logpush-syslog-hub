@@ -15,7 +15,23 @@ app.route("/", adminRoute);
 // (served from ./dist via the `ASSETS` binding) — defer to it so the SPA's
 // own router/index.html can handle it. See wrangler.jsonc `assets` config.
 app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
-app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
+app.all("*", (c) => {
+  // The web UI is a static SPA — it only ever serves GET/HEAD. A POST/PUT/etc
+  // outside /api/* almost always means the URL is wrong (most commonly: a
+  // Logpush destination_conf pointed at the site root instead of
+  // /api/ingest/:dataset, which Cloudflare's static assets handler would
+  // otherwise reject with an opaque 405 — see README Troubleshooting).
+  if (c.req.method !== "GET" && c.req.method !== "HEAD") {
+    return c.json(
+      {
+        error: "Not found",
+        hint: "This Worker only accepts non-GET requests under /api/*. Did you mean /api/ingest/:dataset or /api/admin/*?",
+      },
+      404,
+    );
+  }
+  return c.env.ASSETS.fetch(c.req.raw);
+});
 
 app.onError((err, c) => {
   console.error("Unhandled error:", err);

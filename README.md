@@ -338,8 +338,15 @@ npm test              # builds the UI, then ~52 tests, ~90% coverage
 | Nothing arrives at my syslog server | Check the Dashboard tab for forwarded/dropped counts and the last error. Use **Test send** to isolate Logpush vs. delivery issues. |
 | Messages look truncated or merged | Switch the destination's [Framing](#framing-which-one-do-i-pick) setting. |
 | `Workers VPC` transport fails immediately | Confirm `vpc_networks` in `wrangler.jsonc` is uncommented with a real tunnel ID, and that you've redeployed since changing it. |
-| Logpush job creation fails validation | The ingest endpoint must return `2xx` during Logpush's ownership check — double-check `INGEST_SECRET` matches exactly, including the URL-encoded `Bearer%20` prefix. |
+| Logpush job creation fails: `Invalid destination configuration: error writing object: error uploading to https: status:405` | Your `destination_conf` URL is missing `/api/ingest/:dataset` — it's most likely pointing at the site root (or an old pre-merge `/ingest/...` path). Cloudflare validates every HTTP destination by POSTing a small test payload to the URL you gave it; anything outside `/api/*` is the web UI (GET/HEAD only), so a POST there is rejected. Fix the URL to `https://<your-worker>.workers.dev/api/ingest/<dataset>?header_Authorization=Bearer%20<INGEST_SECRET>` and try again. |
+| Logpush job creation fails with a different/other validation error | Double-check `INGEST_SECRET` matches exactly, including the URL-encoded `Bearer%20` prefix — the ingest endpoint must return `2xx` during Logpush's validation POST. |
 | Web UI shows "Unauthorized" | Your `ADMIN_SECRET` doesn't match what's deployed. Click **Disconnect** and re-enter it. |
+
+> **Heads up:** Cloudflare's destination validation sends one real POST with
+> a tiny test payload (`{"content":"tests"}`) to your `destination_conf` URL
+> when you create or update an HTTP Logpush job. If a destination already
+> exists for that dataset, you'll see this show up as one harmless extra
+> delivery/CEF line the first time — that's expected, not a bug.
 
 ---
 
