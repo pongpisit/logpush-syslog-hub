@@ -111,11 +111,15 @@ adminRoute.get("/api/admin/status", async (c) => {
 
 // ---- Test send ----
 
-// Built fresh per-request (not at module scope) because Date.now() and
+// Sample records for every dataset with a built-in default mapping (see
+// DEFAULT_MAPPING_RULES in shared/cef-defaults.ts) — populates every field
+// each dataset's mapping rules reference, so "Test send" produces a fully
+// filled-in CEF message instead of one with mostly-empty extensions.
+// Built fresh per call (not at module scope) because Date.now() and
 // crypto.randomUUID() outside a request context return fixed/deterministic
 // values in the Workers runtime.
-function buildSampleHttpRequestRecord() {
-  return {
+const SAMPLE_RECORD_BUILDERS: Record<string, () => Record<string, unknown>> = {
+  http_requests: () => ({
     RayID: crypto.randomUUID().replace(/-/g, "").slice(0, 16),
     EdgeStartTimestamp: Date.now() * 1_000_000,
     ClientIP: "203.0.113.1",
@@ -133,7 +137,134 @@ function buildSampleHttpRequestRecord() {
     EdgeTimeToFirstByteMs: 18,
     CacheCacheStatus: "MISS",
     ZoneName: "example.com",
-  };
+  }),
+  firewall_events: () => ({
+    RayID: crypto.randomUUID().replace(/-/g, "").slice(0, 16),
+    Datetime: new Date().toISOString(),
+    ClientIP: "203.0.113.2",
+    ClientCountry: "US",
+    ClientRequestHost: "example.com",
+    ClientRequestPath: "/wp-login.php",
+    ClientRequestMethod: "POST",
+    ClientRequestQuery: "",
+    ClientRequestUserAgent: "curl/8.4.0",
+    EdgeColoCode: "SIN",
+    ZoneName: "example.com",
+    EdgeResponseStatus: 403,
+    Action: "block",
+    RuleID: "1a2b3c4d5e6f7g8h",
+    Source: "waf",
+  }),
+  dns_logs: () => ({
+    Timestamp: new Date().toISOString(),
+    SourceIP: "203.0.113.3",
+    QueryName: "example.com",
+    QueryType: 1,
+    ResponseCode: 0,
+    ColoCode: "SIN",
+    ResponseCached: true,
+    EDNSSubnet: "203.0.113.0",
+  }),
+  spectrum_events: () => ({
+    Timestamp: new Date().toISOString(),
+    ClientIP: "203.0.113.4",
+    ClientPort: 51234,
+    OriginIP: "198.51.100.10",
+    OriginPort: 22,
+    Event: "disconnect",
+    Application: "test-send-app",
+    ClientProto: "tcp",
+    ClientCountry: "US",
+    ClientTlsStatus: "OK",
+    ClientMatchedIpFirewall: "UNKNOWN",
+    Status: 0,
+    ClientBytes: 1024,
+    OriginBytes: 2048,
+  }),
+  gateway_http: () => ({
+    Datetime: new Date().toISOString(),
+    SourceIP: "203.0.113.5",
+    SourcePort: 54321,
+    DestinationIP: "198.51.100.20",
+    DestinationPort: 443,
+    HTTPHost: "example.com",
+    URL: "https://example.com/api/v1/data",
+    HTTPMethod: "GET",
+    UserAgent: "Mozilla/5.0 (logpush-syslog-hub test-send)",
+    Action: "allow",
+    Email: "user@example.com",
+    HTTPStatusCode: 200,
+    PolicyName: "Default HTTP Policy",
+    DeviceName: "Laptop MB810",
+    SourceIPCountryCode: "US",
+    RequestID: crypto.randomUUID(),
+    PolicyID: crypto.randomUUID(),
+  }),
+  gateway_dns: () => ({
+    Datetime: new Date().toISOString(),
+    SrcIP: "203.0.113.6",
+    SrcPort: 0,
+    DstIP: "198.51.100.30",
+    DstPort: 0,
+    Email: "user@example.com",
+    ResolverDecision: "allow",
+    QueryName: "example.com",
+    QueryTypeName: "A",
+    RCode: 0,
+    PolicyName: "Default DNS Policy",
+    DeviceName: "Laptop MB810",
+    Location: "Office NYC",
+    QueryID: crypto.randomUUID(),
+    PolicyID: crypto.randomUUID(),
+  }),
+  gateway_network: () => ({
+    Datetime: new Date().toISOString(),
+    SourceIP: "203.0.113.7",
+    SourcePort: 51234,
+    DestinationIP: "198.51.100.40",
+    DestinationPort: 443,
+    Email: "user@example.com",
+    Action: "allow",
+    TransportProtocol: "tcp",
+    SNI: "example.com",
+    DetectedProtocol: "tls",
+    PolicyName: "Default Network Policy",
+    DeviceName: "Laptop MB810",
+    SourceIPCountryCode: "US",
+    SessionID: crypto.randomUUID(),
+    PolicyID: crypto.randomUUID(),
+  }),
+  audit_logs: () => ({
+    When: new Date().toISOString(),
+    ActorEmail: "admin@example.com",
+    ActorIP: "203.0.113.8",
+    ActionType: "update",
+    ActionResult: true,
+    ResourceType: "zone",
+    ActorType: "user",
+    Interface: "dash",
+    ID: crypto.randomUUID(),
+    ResourceID: crypto.randomUUID(),
+    OwnerID: crypto.randomUUID(),
+  }),
+  nel_reports: () => ({
+    Timestamp: new Date().toISOString(),
+    Type: "tcp.timed_out",
+    Phase: "connection",
+    ClientIPASNDescription: "EXAMPLE-AS",
+    ClientIPCountry: "US",
+    LastKnownGoodColoCode: "SIN",
+    ClientIPASN: 64500,
+  }),
+};
+
+function buildSampleHttpRequestRecord(): Record<string, unknown> {
+  return SAMPLE_RECORD_BUILDERS.http_requests!();
+}
+
+function buildSampleRecord(dataset: string): Record<string, unknown> {
+  const builder = SAMPLE_RECORD_BUILDERS[dataset];
+  return builder ? builder() : buildSampleHttpRequestRecord();
 }
 
 adminRoute.post("/api/admin/test-send", async (c) => {
@@ -146,15 +277,18 @@ adminRoute.post("/api/admin/test-send", async (c) => {
   const destination = await getDestination(c.env.DB, parsed.data.destinationId);
   if (!destination) return c.json({ error: "Destination not found" }, 404);
 
-  const record = parsed.data.record ?? buildSampleHttpRequestRecord();
+  const sampleDataset = destination.dataset === "all" ? "http_requests" : destination.dataset;
+  const record = parsed.data.record ?? buildSampleRecord(sampleDataset);
   const mapping = destination.mappingId ? await getMapping(c.env.DB, destination.mappingId) : null;
   const rules = mapping?.rules ?? GENERIC_FALLBACK_RULES;
 
   const message = buildCefMessage({
-    dataset: destination.dataset === "all" ? "http_requests" : destination.dataset,
+    dataset: sampleDataset,
     record,
     rules,
     syslogHostname: destination.syslogHostname,
+    format: destination.format,
+    facility: destination.facility,
   });
 
   try {

@@ -51,9 +51,12 @@ export function frameMessage(message: string, frame: "rfc6587" | "newline"): Uin
 /**
  * Send one already-formatted syslog message over TCP to a destination.
  * Supports:
- *  - transport "direct": plain TCP via `cloudflare:sockets` connect() (no TLS in this build).
- *  - transport "vpc": plaintext TCP via a Workers VPC Network binding
- *    (reaches any host:port behind the bound Cloudflare Tunnel/Mesh).
+ *  - transport "direct": TCP via `cloudflare:sockets` connect(). Plaintext by
+ *    default; set `destination.tls` to wrap the connection in TLS (RFC 5425 —
+ *    "Transport Layer Security (TLS) Transport Mapping for Syslog").
+ *  - transport "vpc": plaintext-only TCP via a Workers VPC Network binding
+ *    (reaches any host:port behind the bound Cloudflare Tunnel/Mesh). TLS is
+ *    rejected for this transport — see the check below.
  * Framing:
  *  - "rfc6587": octet-count prefix `"<byteLength> "` before the message (robust
  *    length-prefixed TCP syslog framing per RFC 6587).
@@ -61,7 +64,7 @@ export function frameMessage(message: string, frame: "rfc6587" | "newline"): Uin
  *    the default expected by most syslog daemons such as rsyslog and syslog-ng).
  */
 export async function sendSyslogMessage(
-  destination: Pick<Destination, "host" | "port" | "transport" | "frame">,
+  destination: Pick<Destination, "host" | "port" | "transport" | "frame" | "tls">,
   message: string,
   vpcBinding: VpcNetworkBinding | undefined,
   timeoutMs = DEFAULT_DELIVERY_TIMEOUT_MS,
@@ -74,11 +77,21 @@ export async function sendSyslogMessage(
           "Add a vpc_networks binding to wrangler.jsonc and redeploy.",
       );
     }
+    if (destination.tls) {
+      // Workers VPC connect() is plaintext-only per Cloudflare's docs — fail
+      // fast with a clear message rather than silently sending unencrypted
+      // bytes when the user asked for TLS.
+      throw new SyslogDeliveryError(
+        "TLS is not supported over the 'vpc' transport (Workers VPC connections are plaintext-only). " +
+          "Either disable TLS on this destination, or switch transport to 'direct' and terminate TLS " +
+          "at the receiver (e.g. rsyslog's imtcp with a gtls driver, or a TLS-terminating proxy).",
+      );
+    }
     socket = await vpcBinding.connect(`${destination.host}:${destination.port}`);
   } else {
     socket = connect(
       { hostname: destination.host, port: destination.port },
-      { secureTransport: "off", allowHalfOpen: false },
+      { secureTransport: destination.tls ? "on" : "off", allowHalfOpen: false },
     );
   }
 

@@ -205,4 +205,60 @@ describe("admin test-send", () => {
     expect(body.ok).toBe(false);
     expect(body.message).toContain("CEF:0|Cloudflare|Logpush|1.0|http_requests|HTTP Request|");
   });
+
+  // One destination per dataset that ships a default mapping, so "Test send"
+  // exercises every one end-to-end: sample record -> default mapping rules ->
+  // CEF extensions. Regression guard for the sample-record/mapping field-name
+  // drift that's easy to introduce when either side changes independently.
+  const DATASETS_WITH_DEFAULT_MAPPINGS = [
+    "http_requests",
+    "firewall_events",
+    "dns_logs",
+    "spectrum_events",
+    "gateway_http",
+    "gateway_dns",
+    "gateway_network",
+    "audit_logs",
+    "nel_reports",
+  ];
+
+  it.each(DATASETS_WITH_DEFAULT_MAPPINGS)(
+    "'Test send' for dataset '%s' populates multiple CEF extension fields from its default mapping + built-in sample record",
+    async (dataset) => {
+      const createRes = await SELF.fetch(
+        "https://example.com/api/admin/destinations",
+        authed({
+          method: "POST",
+          body: JSON.stringify({
+            name: `Unreachable (${dataset})`,
+            host: "127.0.0.1",
+            port: 1,
+            protocol: "tcp",
+            transport: "direct",
+            frame: "rfc6587",
+            dataset,
+            mappingId: `default-${dataset.replace(/_/g, "-")}`,
+            syslogHostname: "cloudflare",
+            enabled: true,
+          }),
+        }),
+      );
+      expect(createRes.status).toBe(201);
+      const created = await createRes.json<{ destination: { id: string } }>();
+
+      const res = await SELF.fetch(
+        "https://example.com/api/admin/test-send",
+        authed({ method: "POST", body: JSON.stringify({ destinationId: created.destination.id }) }),
+      );
+      expect(res.status).toBe(502); // delivery fails (port 1 is unreachable) — we only care about the built message
+      const body = await res.json<{ message: string }>();
+
+      expect(body.message).toContain(`cat=${dataset}`);
+      // The built-in sample record's field names are chosen to match this
+      // dataset's default mapping rules, so most rules should resolve to a
+      // real extension key=value pair, not be skipped as "missing".
+      const extensionKeyCount = (body.message.match(/ [a-zA-Z][a-zA-Z0-9]*=/g) ?? []).length;
+      expect(extensionKeyCount, `expected several populated CEF fields for '${dataset}', got: ${body.message}`).toBeGreaterThan(4);
+    },
+  );
 });

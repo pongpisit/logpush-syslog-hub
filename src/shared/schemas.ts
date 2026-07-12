@@ -39,6 +39,18 @@ export type Transport = z.infer<typeof TransportSchema>;
 export const FrameSchema = z.enum(["rfc6587", "newline"]);
 export type Frame = z.infer<typeof FrameSchema>;
 
+/**
+ * Which syslog header wraps the CEF payload:
+ *  - "rfc3164": classic BSD syslog header (`<PRI>Mmm DD HH:MM:SS hostname CEF:0|...`).
+ *    Widest compatibility — what most legacy syslog daemons and SIEM CEF
+ *    connectors expect.
+ *  - "rfc5424": structured syslog header (`<PRI>1 ISO8601-timestamp hostname
+ *    app-name procid msgid - CEF:0|...`). Preferred by newer collectors that
+ *    want an unambiguous, sub-second, timezone-explicit timestamp.
+ */
+export const SyslogFormatSchema = z.enum(["rfc3164", "rfc5424"]);
+export type SyslogFormat = z.infer<typeof SyslogFormatSchema>;
+
 export const DestinationSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(120),
@@ -47,6 +59,15 @@ export const DestinationSchema = z.object({
   protocol: z.literal("tcp").default("tcp"),
   transport: TransportSchema.default("direct"),
   frame: FrameSchema.default("rfc6587"),
+  format: SyslogFormatSchema.default("rfc3164"),
+  // Syslog facility (RFC 5424 Table 1): 0=kern ... 23=local7. Combined with
+  // the per-event severity to compute PRI = facility*8 + severity. 16 (local0)
+  // is a conventional default for application-generated logs.
+  facility: z.number().int().min(0).max(23).default(16),
+  // Wrap the TCP connection in TLS (RFC 5425). Only meaningful for
+  // transport="direct" — Workers VPC connections are plaintext-only, so this
+  // is rejected at delivery time if combined with transport="vpc".
+  tls: z.boolean().default(false),
   dataset: z.string().min(1).max(64),
   mappingId: z.string().min(1).nullable(),
   syslogHostname: z.string().min(1).max(255).default("cloudflare"),

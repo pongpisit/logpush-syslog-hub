@@ -25,11 +25,29 @@ describe("sendSyslogMessage", () => {
   it("throws SyslogDeliveryError when transport is 'vpc' but no binding is configured", async () => {
     await expect(
       sendSyslogMessage(
-        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "rfc6587" },
+        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "rfc6587", tls: false },
         "hello",
         undefined,
       ),
     ).rejects.toBeInstanceOf(SyslogDeliveryError);
+  });
+
+  it("rejects tls=true combined with transport='vpc' with a clear error, even if a binding IS configured", async () => {
+    // Workers VPC connect() is plaintext-only — this must fail fast with a
+    // clear message rather than silently sending unencrypted bytes, or
+    // (worse) attempting something the binding doesn't support.
+    const vpcBinding = {
+      connect: () => {
+        throw new Error("connect() should not be called when tls+vpc is rejected up front");
+      },
+    };
+    await expect(
+      sendSyslogMessage(
+        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "rfc6587", tls: true },
+        "hello",
+        vpcBinding,
+      ),
+    ).rejects.toThrow(/TLS is not supported over the 'vpc' transport/);
   });
 
   it("uses the provided VPC binding's connect() when transport is 'vpc'", async () => {
@@ -55,7 +73,7 @@ describe("sendSyslogMessage", () => {
     };
 
     const info = await sendSyslogMessage(
-      { host: "10.0.0.1", port: 514, transport: "vpc", frame: "rfc6587" },
+      { host: "10.0.0.1", port: 514, transport: "vpc", frame: "rfc6587", tls: false },
       "hi",
       vpcBinding,
     );
@@ -88,7 +106,7 @@ describe("sendSyslogMessage", () => {
 
     await expect(
       sendSyslogMessage(
-        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "newline" },
+        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "newline", tls: false },
         "hi",
         vpcBinding,
         5_000, // long enough that a timeout would NOT be what we assert on
@@ -119,7 +137,7 @@ describe("sendSyslogMessage", () => {
 
     await expect(
       sendSyslogMessage(
-        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "newline" },
+        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "newline", tls: false },
         "hi",
         vpcBinding,
         50, // short timeout so the test itself doesn't hang
@@ -151,7 +169,7 @@ describe("sendSyslogMessage", () => {
 
     await expect(
       sendSyslogMessage(
-        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "newline" },
+        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "newline", tls: false },
         "hi",
         vpcBinding,
         50,

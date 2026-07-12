@@ -45,6 +45,8 @@ export async function queue(
         record,
         rules,
         syslogHostname: destination.syslogHostname,
+        format: destination.format,
+        facility: destination.facility,
       });
 
       await sendSyslogMessage(destination, message, vpcBinding);

@@ -3,9 +3,24 @@ import type { Mapping, MappingInput, MappingRule } from "../types.js";
 
 const EMPTY_RULE: MappingRule = { cefKey: "", sourceField: "" };
 
-// Mirrors the timestamp candidates in ../../src/services/cef.ts (buildCefMessage).
+// Mirrors TIMESTAMP_FIELD_CANDIDATES in ../../src/services/cef.ts (buildCefMessage).
 // Any one of these present in a Logpush record is used to populate CEF's `rt`.
-const TIMESTAMP_FIELD_CANDIDATES = ["EdgeStartTimestamp", "Datetime", "Timestamp", "EdgeEndTimestamp"];
+const TIMESTAMP_FIELD_CANDIDATES = ["EdgeStartTimestamp", "Datetime", "Timestamp", "When", "EdgeEndTimestamp"];
+
+// Datasets with a built-in generic default mapping (see DEFAULT_MAPPING_RULES
+// in ../../src/shared/cef-defaults.ts) — offered as autocomplete suggestions,
+// but the field below still accepts any Logpush dataset name.
+const KNOWN_DATASETS = [
+  "http_requests",
+  "firewall_events",
+  "dns_logs",
+  "spectrum_events",
+  "gateway_http",
+  "gateway_dns",
+  "gateway_network",
+  "audit_logs",
+  "nel_reports",
+];
 
 /**
  * Every `sourceField` referenced by this mapping's rules, plus a reminder to
@@ -71,11 +86,17 @@ export function MappingForm({
           Dataset
           <input
             className="input"
+            list="known-datasets"
             value={dataset}
             onChange={(e) => setDataset(e.target.value)}
             placeholder="http_requests"
             required
           />
+          <datalist id="known-datasets">
+            {KNOWN_DATASETS.map((d) => (
+              <option key={d} value={d} />
+            ))}
+          </datalist>
         </label>
       </div>
 

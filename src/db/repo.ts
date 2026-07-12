@@ -15,6 +15,9 @@ interface DestinationRow {
   protocol: string;
   transport: string;
   frame: string;
+  format: string;
+  facility: number;
+  tls: number;
   dataset: string;
   mapping_id: string | null;
   syslog_hostname: string;
@@ -50,6 +53,9 @@ function rowToDestination(row: DestinationRow): Destination {
     protocol: "tcp",
     transport: row.transport === "vpc" ? "vpc" : "direct",
     frame: row.frame === "newline" ? "newline" : "rfc6587",
+    format: row.format === "rfc5424" ? "rfc5424" : "rfc3164",
+    facility: row.facility,
+    tls: row.tls === 1,
     dataset: row.dataset,
     mappingId: row.mapping_id,
     syslogHostname: row.syslog_hostname,
@@ -126,8 +132,8 @@ export async function createDestination(
   await db
     .prepare(
       `INSERT INTO destinations
-        (id, name, host, port, protocol, transport, frame, dataset, mapping_id, syslog_hostname, enabled)
-       VALUES (?1, ?2, ?3, ?4, 'tcp', ?5, ?6, ?7, ?8, ?9, ?10)`,
+        (id, name, host, port, protocol, transport, frame, format, facility, tls, dataset, mapping_id, syslog_hostname, enabled)
+       VALUES (?1, ?2, ?3, ?4, 'tcp', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
     )
     .bind(
       id,
@@ -136,6 +142,9 @@ export async function createDestination(
       input.port,
       input.transport,
       input.frame,
+      input.format,
+      input.facility,
+      input.tls ? 1 : 0,
       input.dataset,
       input.mappingId,
       input.syslogHostname,
@@ -160,7 +169,8 @@ export async function updateDestination(
     .prepare(
       `UPDATE destinations SET
         name = ?2, host = ?3, port = ?4, transport = ?5, frame = ?6,
-        dataset = ?7, mapping_id = ?8, syslog_hostname = ?9, enabled = ?10,
+        format = ?7, facility = ?8, tls = ?9,
+        dataset = ?10, mapping_id = ?11, syslog_hostname = ?12, enabled = ?13,
         updated_at = datetime('now')
        WHERE id = ?1`,
     )
@@ -171,6 +181,9 @@ export async function updateDestination(
       input.port,
       input.transport,
       input.frame,
+      input.format,
+      input.facility,
+      input.tls ? 1 : 0,
       input.dataset,
       input.mappingId,
       input.syslogHostname,

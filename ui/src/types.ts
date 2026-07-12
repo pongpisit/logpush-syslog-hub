@@ -5,6 +5,7 @@
 
 export type Transport = "vpc" | "direct";
 export type Frame = "rfc6587" | "newline";
+export type SyslogFormat = "rfc3164" | "rfc5424";
 
 export interface MappingRule {
   cefKey: string;
@@ -32,6 +33,9 @@ export interface Destination {
   protocol: "tcp";
   transport: Transport;
   frame: Frame;
+  format: SyslogFormat;
+  facility: number;
+  tls: boolean;
   dataset: string;
   mappingId: string | null;
   syslogHostname: string;
