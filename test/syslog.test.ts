@@ -35,6 +35,7 @@ describe("sendSyslogMessage", () => {
   it("uses the provided VPC binding's connect() when transport is 'vpc'", async () => {
     const written: Uint8Array[] = [];
     const fakeSocket = {
+      opened: Promise.resolve({ remoteAddress: "10.0.0.1:514", localAddress: "0.0.0.0:0" }),
       writable: {
         getWriter: () => ({
           write: async (chunk: Uint8Array) => {
@@ -53,7 +54,7 @@ describe("sendSyslogMessage", () => {
       },
     };
 
-    await sendSyslogMessage(
+    const info = await sendSyslogMessage(
       { host: "10.0.0.1", port: 514, transport: "vpc", frame: "rfc6587" },
       "hi",
       vpcBinding,
@@ -61,14 +62,78 @@ describe("sendSyslogMessage", () => {
 
     const decoder = new TextDecoder();
     expect(written.map((c) => decoder.decode(c))).toEqual(["2 ", "hi"]);
+    // Returns the real peer address as proof of a completed handshake.
+    expect(info.remoteAddress).toBe("10.0.0.1:514");
   });
 
-  it("times out instead of hanging forever when the destination never responds", async () => {
-    // Simulates a destination that silently drops packets (no listener, no
-    // RST) — the exact scenario that used to hang sendSyslogMessage
-    // indefinitely, blocking both "Test send" and the queue consumer.
+  it("surfaces the real error when the connection is rejected (opened rejects)", async () => {
+    // A hard connect failure — Cloudflare-IP block, HTTP-port guard, connection
+    // refused — surfaces as `socket.opened` rejecting quickly. Even if buffered
+    // writes resolve and the socket never reaches a clean `closed`, we must
+    // report that underlying error rather than a generic timeout or false success.
+    const rejectedSocket = {
+      opened: Promise.reject(new Error("proxy request failed, cannot connect to the specified address")),
+      writable: {
+        getWriter: () => ({
+          write: async () => undefined, // buffered write resolves immediately
+          close: async () => undefined,
+        }),
+      },
+      closed: new Promise<void>(() => undefined), // never closes cleanly
+      close: async () => undefined,
+    };
+    const vpcBinding = {
+      connect: () => rejectedSocket as unknown as Socket,
+    };
+
+    await expect(
+      sendSyslogMessage(
+        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "newline" },
+        "hi",
+        vpcBinding,
+        5_000, // long enough that a timeout would NOT be what we assert on
+      ),
+    ).rejects.toThrow(/proxy request failed/);
+  });
+
+  it("times out when the socket never closes cleanly (blackholed destination)", async () => {
+    // No listener / firewall drop: writes may buffer and `opened` never settles
+    // either way, so `socket.closed` never resolves. Must time out, not hang.
     let closed = false;
-    const neverResolvingSocket = {
+    const blackholeSocket = {
+      opened: new Promise<never>(() => undefined), // never resolves or rejects
+      writable: {
+        getWriter: () => ({
+          write: async () => undefined, // buffered write resolves immediately
+          close: async () => undefined,
+        }),
+      },
+      closed: new Promise<void>(() => undefined), // never closes
+      close: async () => {
+        closed = true;
+      },
+    };
+    const vpcBinding = {
+      connect: () => blackholeSocket as unknown as Socket,
+    };
+
+    await expect(
+      sendSyslogMessage(
+        { host: "10.0.0.1", port: 514, transport: "vpc", frame: "newline" },
+        "hi",
+        vpcBinding,
+        50, // short timeout so the test itself doesn't hang
+      ),
+    ).rejects.toThrow(/timed out after 50ms/);
+
+    expect(closed).toBe(true);
+  });
+
+  it("times out instead of hanging forever when a connected destination never drains writes", async () => {
+    // Handshake completes, but the peer never accepts our bytes (stuck write).
+    let closed = false;
+    const stuckWriteSocket = {
+      opened: Promise.resolve({ remoteAddress: "10.0.0.1:514", localAddress: "0.0.0.0:0" }),
       writable: {
         getWriter: () => ({
           write: () => new Promise<void>(() => undefined), // never resolves
@@ -81,7 +146,7 @@ describe("sendSyslogMessage", () => {
       },
     };
     const vpcBinding = {
-      connect: () => neverResolvingSocket as unknown as Socket,
+      connect: () => stuckWriteSocket as unknown as Socket,
     };
 
     await expect(
@@ -89,7 +154,7 @@ describe("sendSyslogMessage", () => {
         { host: "10.0.0.1", port: 514, transport: "vpc", frame: "newline" },
         "hi",
         vpcBinding,
-        50, // short timeout so the test itself doesn't hang
+        50,
       ),
     ).rejects.toThrow(/timed out after 50ms/);
 

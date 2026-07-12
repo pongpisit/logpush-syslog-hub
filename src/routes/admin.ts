@@ -161,9 +161,12 @@ adminRoute.post("/api/admin/test-send", async (c) => {
     const vpcBinding = (c.env as unknown as Record<string, unknown>)["SYSLOG_VPC"] as
       | Parameters<typeof sendSyslogMessage>[2]
       | undefined;
-    await sendSyslogMessage(destination, message, vpcBinding);
+    const info = await sendSyslogMessage(destination, message, vpcBinding);
     await recordDeliverySuccess(c.env.DB, destination.id);
-    return c.json({ ok: true, message });
+    // Surface the real TCP peer we connected to. If `remoteAddress` doesn't
+    // match the origin you expect (e.g. it's a Cloudflare anycast IP), the
+    // destination hostname is proxied and the bytes aren't reaching your box.
+    return c.json({ ok: true, message, remoteAddress: info.remoteAddress });
   } catch (err) {
     const errorMessage = err instanceof SyslogDeliveryError || err instanceof Error
       ? err.message

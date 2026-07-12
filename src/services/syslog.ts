@@ -13,7 +13,11 @@ import type { Destination } from "../shared/index.js";
  * `Socket` immediately; the handshake happens on first write/read.
  */
 export interface VpcNetworkBinding {
-  connect(address: string): Socket;
+  // Per the Workers VPC docs, this returns `Promise<Socket>` (unlike
+  // `cloudflare:sockets`' synchronous `connect()`). We type it as either and
+  // `await` it at the call site so the code is correct regardless of which
+  // shape the runtime hands back.
+  connect(address: string): Socket | Promise<Socket>;
 }
 
 export class SyslogDeliveryError extends Error {}
@@ -61,7 +65,7 @@ export async function sendSyslogMessage(
   message: string,
   vpcBinding: VpcNetworkBinding | undefined,
   timeoutMs = DEFAULT_DELIVERY_TIMEOUT_MS,
-): Promise<void> {
+): Promise<SocketInfo> {
   let socket: Socket;
   if (destination.transport === "vpc") {
     if (!vpcBinding) {
@@ -70,7 +74,7 @@ export async function sendSyslogMessage(
           "Add a vpc_networks binding to wrangler.jsonc and redeploy.",
       );
     }
-    socket = vpcBinding.connect(`${destination.host}:${destination.port}`);
+    socket = await vpcBinding.connect(`${destination.host}:${destination.port}`);
   } else {
     socket = connect(
       { hostname: destination.host, port: destination.port },
@@ -78,16 +82,42 @@ export async function sendSyslogMessage(
     );
   }
 
-  const send = async () => {
+  const send = async (): Promise<SocketInfo> => {
+    // Completion signal for fire-and-forget TCP syslog:
+    //   (1) the TCP handshake completes — `socket.opened` resolves (and rejects
+    //       fast on a hard failure: Cloudflare-IP block, HTTP-port guard,
+    //       connection refused), giving us the real peer address as proof; AND
+    //   (2) our framed bytes are written and our writable half is closed.
+    //
+    // We deliberately DO NOT await `socket.closed`. A syslog daemon (rsyslog,
+    // syslog-ng, …) receives the record and keeps the TCP connection open —
+    // it never closes its side and sends nothing back. Since we also never
+    // drain `socket.readable`, `socket.closed` would never resolve, so waiting
+    // on it made every real delivery hang until the timeout. The outer
+    // `finally` force-closes the socket once we're done.
+    //
+    // `connect()` is lazy (the SYN isn't sent until the first I/O), so we kick
+    // off the write concurrently to trigger the connection, then await the
+    // handshake and the flush together.
     const writer = socket.writable.getWriter();
-    try {
-      for (const chunk of frameMessage(message, destination.frame)) {
-        await writer.write(chunk);
+    const writeAll = (async () => {
+      try {
+        for (const chunk of frameMessage(message, destination.frame)) {
+          await writer.write(chunk);
+        }
+      } finally {
+        await writer.close().catch(() => undefined);
       }
-    } finally {
-      await writer.close().catch(() => undefined);
+    })();
+
+    let info: SocketInfo;
+    try {
+      info = await socket.opened;
+    } catch (err) {
+      throw err instanceof Error ? err : new SyslogDeliveryError(String(err));
     }
-    await socket.closed.catch(() => undefined);
+    await writeAll;
+    return info;
   };
 
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -103,7 +133,7 @@ export async function sendSyslogMessage(
   });
 
   try {
-    await Promise.race([send(), timeout]);
+    return await Promise.race([send(), timeout]);
   } finally {
     clearTimeout(timer);
     // On timeout, `send()` is still running against a socket nobody's
