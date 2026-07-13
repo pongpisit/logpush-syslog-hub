@@ -261,3 +261,212 @@ describe("rfc5424Timestamp", () => {
     expect(rfc5424Timestamp(epochMs)).toBe("2026-01-15T10:30:00.123Z");
   });
 });
+
+describe("buildCefMessage — raw JSON passthrough (SOC field coverage guarantee)", () => {
+  it("appends a raw= extension containing the full record as JSON by default", () => {
+    const record = { ClientIP: "203.0.113.1", SomeFutureField: "not yet mapped by any rule" };
+    const message = buildCefMessage({
+      dataset: "http_requests",
+      record,
+      rules: [],
+      syslogHostname: "cloudflare",
+    });
+    expect(message).toContain(`raw=${JSON.stringify(record)}`);
+  });
+
+  it("omits raw= when includeRaw is explicitly false", () => {
+    const message = buildCefMessage({
+      dataset: "http_requests",
+      record: { ClientIP: "203.0.113.1" },
+      rules: [],
+      syslogHostname: "cloudflare",
+      includeRaw: false,
+    });
+    expect(message).not.toContain("raw=");
+  });
+
+  it("omits raw= entirely for an empty record", () => {
+    const message = buildCefMessage({
+      dataset: "http_requests",
+      record: {},
+      rules: [],
+      syslogHostname: "cloudflare",
+    });
+    expect(message).not.toContain("raw=");
+  });
+
+  it("truncates an oversized record instead of producing an unbounded line", () => {
+    const hugeArray = Array.from({ length: 2000 }, (_, i) => `item-${i}`);
+    const message = buildCefMessage({
+      dataset: "http_requests",
+      record: { HugeField: hugeArray },
+      rules: [],
+      syslogHostname: "cloudflare",
+    });
+    expect(message).toContain("truncated");
+    // The whole message should still be bounded, not multi-hundred-KB.
+    expect(message.length).toBeLessThan(20_000);
+  });
+
+  it("still escapes CEF-reserved characters inside the raw JSON blob", () => {
+    const message = buildCefMessage({
+      dataset: "http_requests",
+      record: { ClientRequestHost: "a=b" },
+      rules: [],
+      syslogHostname: "cloudflare",
+    });
+    // The JSON string contains a literal `=` inside the value; CEF
+    // extension escaping must still apply within raw=.
+    expect(message).toContain('raw={"ClientRequestHost":"a\\=b"}');
+  });
+});
+
+describe("buildCefMessage — SOC field mappings (bot/WAF/DDoS/creds-leak/insider-threat/0-day)", () => {
+  it("maps http_requests bot-detection and WAF-tuning fields (bot, WAF, 0-day use cases)", () => {
+    const message = buildCefMessage({
+      dataset: "http_requests",
+      record: {
+        ClientIP: "203.0.113.1",
+        SecurityAction: "block",
+        SecurityRuleID: "abc123",
+        SecurityActions: ["block", "log"],
+        SecuritySources: ["waf", "botManagement"],
+        BotScore: 4,
+        BotScoreSrc: "Machine Learning",
+        JA3Hash: "e7d705a3286e19ea42f587b344ee6865",
+        WAFAttackScore: 8,
+        ClientASN: 64500,
+        ClientIPClass: "scan",
+        LeakedCredentialCheckResult: "username_and_password_leaked",
+      },
+      rules: DEFAULT_MAPPING_RULES.http_requests ?? [],
+      syslogHostname: "cloudflare",
+      includeRaw: false,
+    });
+    expect(message).toContain("act=block");
+    expect(message).toContain("deviceExternalId=abc123");
+    // Array-valued fields are JSON-encoded (not comma-joined), so a value
+    // containing a literal comma is never ambiguous with the array's own
+    // element separator.
+    expect(message).toContain('cs7=["block","log"] cs7Label=securityActions');
+    expect(message).toContain('cs9=["waf","botManagement"] cs9Label=securitySources');
+    expect(message).toContain("cn2=4 cn2Label=botScore");
+    expect(message).toContain("cs14=e7d705a3286e19ea42f587b344ee6865 cs14Label=ja3Hash");
+    expect(message).toContain("cn3=8 cn3Label=wafAttackScore");
+    expect(message).toContain("cs10=64500 cs10Label=clientAsn");
+    expect(message).toContain("cs11=scan cs11Label=clientIpClass");
+    expect(message).toContain("cs15=username_and_password_leaked cs15Label=leakedCredResult");
+  });
+
+  it("maps firewall_events security-product attribution fields (WAF/DDoS use cases)", () => {
+    const message = buildCefMessage({
+      dataset: "firewall_events",
+      record: {
+        ClientIP: "203.0.113.2",
+        Action: "block",
+        Source: "l7ddos",
+        Description: "DDoS mitigation",
+        ClientASN: 64501,
+        ClientASNDescription: "EXAMPLE-ISP",
+      },
+      rules: DEFAULT_MAPPING_RULES.firewall_events ?? [],
+      syslogHostname: "cloudflare",
+      includeRaw: false,
+    });
+    expect(message).toContain("reason=DDoS mitigation");
+    expect(message).toContain("cs2=l7ddos cs2Label=securitySource");
+    expect(message).toContain("cs7=64501 cs7Label=clientAsn");
+    expect(message).toContain("cs8=EXAMPLE-ISP cs8Label=clientAsnDescription");
+  });
+
+  it("maps gateway_http blocked-file fields to the standard CEF file* keys (insider-threat/malware use case)", () => {
+    const message = buildCefMessage({
+      dataset: "gateway_http",
+      record: {
+        SourceIP: "203.0.113.5",
+        Action: "block",
+        BlockedFileHash: "d41d8cd98f00b204e9800998ecf8427e",
+        BlockedFileName: "invoice.exe",
+        BlockedFileType: "exe",
+        BlockedFileSize: 204800,
+        BlockedFileReason: "malware detected",
+        DownloadMatchedDlpProfiles: ["PCI-DSS"],
+      },
+      rules: DEFAULT_MAPPING_RULES.gateway_http ?? [],
+      syslogHostname: "cloudflare",
+      includeRaw: false,
+    });
+    expect(message).toContain("fileHash=d41d8cd98f00b204e9800998ecf8427e");
+    expect(message).toContain("fileName=invoice.exe");
+    expect(message).toContain("fileType=exe");
+    expect(message).toContain("fileSize=204800");
+    expect(message).toContain("reason=malware detected");
+    expect(message).toContain('cs8=["PCI-DSS"] cs8Label=dlpDownloadProfiles');
+  });
+
+  it("JSON-encodes object-valued fields instead of emitting '[object Object]' (insider-threat audit trail use case)", () => {
+    const message = buildCefMessage({
+      dataset: "audit_logs",
+      record: {
+        ActorEmail: "admin@example.com",
+        ActionType: "update",
+        OldValue: { security_level: "high" },
+        NewValue: { security_level: "essentially_off" },
+        Metadata: { zone_name: "example.com" },
+      },
+      rules: DEFAULT_MAPPING_RULES.audit_logs ?? [],
+      syslogHostname: "cloudflare",
+      includeRaw: false,
+    });
+    expect(message).not.toContain("[object Object]");
+    expect(message).toContain('cs6={"security_level":"high"} cs6Label=oldValue');
+    expect(message).toContain('cs7={"security_level":"essentially_off"} cs7Label=newValue');
+  });
+
+  it("maps gateway_dns threat-intel feed matches (0-day/IOC hunting use case)", () => {
+    const message = buildCefMessage({
+      dataset: "gateway_dns",
+      record: {
+        SrcIP: "203.0.113.6",
+        QueryName: "malicious-c2.example",
+        ResolverDecision: "block",
+        MatchedIndicatorFeedNames: ["Vendor Malware Feed"],
+        MatchedCategoryNames: ["Malware"],
+      },
+      rules: DEFAULT_MAPPING_RULES.gateway_dns ?? [],
+      syslogHostname: "cloudflare",
+      includeRaw: false,
+    });
+    expect(message).toContain('cs7=["Vendor Malware Feed"] cs7Label=matchedIndicatorFeedNames');
+    expect(message).toContain('cs6=["Malware"] cs6Label=matchedCategoryNames');
+  });
+
+  it("maps spectrum_events DDoS/network-attribution fields, respecting the API's own field casing", () => {
+    const message = buildCefMessage({
+      dataset: "spectrum_events",
+      record: {
+        ClientIP: "203.0.113.7",
+        Event: "originError",
+        ClientAsn: 64502, // note: lowercase "sn", not "ASN" — matches Cloudflare's docs
+        OriginTlsFingerprint: "2d9f9e6f1a7b3c4d",
+      },
+      rules: DEFAULT_MAPPING_RULES.spectrum_events ?? [],
+      syslogHostname: "cloudflare",
+      includeRaw: false,
+    });
+    expect(message).toContain("cs5=64502 cs5Label=clientAsn");
+    expect(message).toContain("cs7=2d9f9e6f1a7b3c4d cs7Label=originTlsFingerprint");
+  });
+
+  it("skips empty arrays instead of emitting a dangling cefKey=<empty>", () => {
+    const message = buildCefMessage({
+      dataset: "gateway_dns",
+      record: { SrcIP: "203.0.113.6", MatchedIndicatorFeedNames: [] },
+      rules: DEFAULT_MAPPING_RULES.gateway_dns ?? [],
+      syslogHostname: "cloudflare",
+      includeRaw: false,
+    });
+    expect(message).not.toContain("cs7=");
+    expect(message).not.toContain("matchedIndicatorFeedNames");
+  });
+});

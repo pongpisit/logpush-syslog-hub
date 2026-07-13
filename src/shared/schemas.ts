@@ -68,6 +68,13 @@ export const DestinationSchema = z.object({
   // transport="direct" — Workers VPC connections are plaintext-only, so this
   // is rejected at delivery time if combined with transport="vpc".
   tls: z.boolean().default(false),
+  // Append a `raw=<full record JSON>` CEF extension after the mapped
+  // fields. Defaults on: it's what guarantees every field a Logpush
+  // dataset emits (including ones this mapping doesn't name, and any
+  // Cloudflare adds later) reaches the SOC/SIEM, not just the ~15-30
+  // fields that fit in CEF's cs1-cs15/cn1-cn3 slots. Turn off only if a
+  // downstream collector enforces a max line length.
+  includeRaw: z.boolean().default(true),
   dataset: z.string().min(1).max(64),
   mappingId: z.string().min(1).nullable(),
   syslogHostname: z.string().min(1).max(255).default("cloudflare"),

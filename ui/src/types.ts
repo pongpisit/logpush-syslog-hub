@@ -36,6 +36,7 @@ export interface Destination {
   format: SyslogFormat;
   facility: number;
   tls: boolean;
+  includeRaw: boolean;
   dataset: string;
   mappingId: string | null;
   syslogHostname: string;

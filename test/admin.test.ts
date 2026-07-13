@@ -259,6 +259,125 @@ describe("admin test-send", () => {
       // real extension key=value pair, not be skipped as "missing".
       const extensionKeyCount = (body.message.match(/ [a-zA-Z][a-zA-Z0-9]*=/g) ?? []).length;
       expect(extensionKeyCount, `expected several populated CEF fields for '${dataset}', got: ${body.message}`).toBeGreaterThan(4);
+      // Every default-mapped record also always carries the full raw
+      // record as JSON — the guarantee that no field is ever dropped, even
+      // ones this mapping doesn't name.
+      expect(body.message).toContain("raw={");
     },
   );
+
+  // Spot-checks that the SOC-priority fields for each of the six monitoring
+  // use cases (bot, WAF, DDoS, credential-leak, insider-threat, 0-day —
+  // see SOC_USE_CASES.md) actually make it through test-send's sample
+  // record -> default mapping -> CEF extension pipeline, not just "some
+  // field or other" as the generic count-based test above checks.
+  const SOC_PRIORITY_FIELD_CHECKS: Array<{ dataset: string; mustContain: string[] }> = [
+    {
+      dataset: "http_requests",
+      mustContain: [
+        "cn2=4 cn2Label=botScore", // bot detection
+        "cn3=12 cn3Label=wafAttackScore", // WAF / 0-day anomaly score
+        "cs14=e7d705a3286e19ea42f587b344ee6865 cs14Label=ja3Hash", // 0-day/APT fingerprint tracking
+        "cs15=clean cs15Label=leakedCredResult", // credential-leak detection
+      ],
+    },
+    {
+      dataset: "firewall_events",
+      mustContain: [
+        "cs2=waf cs2Label=securitySource", // WAF/bot/DDoS product attribution
+        "cs10=username_and_password_leaked cs10Label=leakedCredResult", // credential-leak detection
+      ],
+    },
+    {
+      dataset: "spectrum_events",
+      mustContain: [
+        "cs5=64502 cs5Label=clientAsn", // DDoS source-network attribution
+        "cs7=2d9f9e6f1a7b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d cs7Label=originTlsFingerprint",
+      ],
+    },
+    {
+      dataset: "audit_logs",
+      mustContain: [
+        'cs6={"security_level":"high"} cs6Label=oldValue', // insider-threat before/after diff
+        'cs7={"security_level":"essentially_off"} cs7Label=newValue',
+      ],
+    },
+  ];
+
+  it.each(SOC_PRIORITY_FIELD_CHECKS)("'Test send' for '$dataset' surfaces its SOC-priority fields", async ({ dataset, mustContain }) => {
+    const createRes = await SELF.fetch(
+      "https://example.com/api/admin/destinations",
+      authed({
+        method: "POST",
+        body: JSON.stringify({
+          name: `SOC field check (${dataset})`,
+          host: "127.0.0.1",
+          port: 1,
+          protocol: "tcp",
+          transport: "direct",
+          frame: "rfc6587",
+          dataset,
+          mappingId: `default-${dataset.replace(/_/g, "-")}`,
+          syslogHostname: "cloudflare",
+          enabled: true,
+        }),
+      }),
+    );
+    const created = await createRes.json<{ destination: { id: string } }>();
+
+    const res = await SELF.fetch(
+      "https://example.com/api/admin/test-send",
+      authed({ method: "POST", body: JSON.stringify({ destinationId: created.destination.id }) }),
+    );
+    const body = await res.json<{ message: string }>();
+
+    for (const fragment of mustContain) {
+      expect(body.message, `expected '${dataset}' CEF message to contain '${fragment}'`).toContain(fragment);
+    }
+  });
+
+  it("'Test send' for 'gateway_http' surfaces DLP profile fields when a sample transfer is blocked (insider-threat use case)", async () => {
+    const createRes = await SELF.fetch(
+      "https://example.com/api/admin/destinations",
+      authed({
+        method: "POST",
+        body: JSON.stringify({
+          name: "SOC field check (gateway_http blocked)",
+          host: "127.0.0.1",
+          port: 1,
+          protocol: "tcp",
+          transport: "direct",
+          frame: "rfc6587",
+          dataset: "gateway_http",
+          mappingId: "default-gateway-http",
+          syslogHostname: "cloudflare",
+          enabled: true,
+        }),
+      }),
+    );
+    const created = await createRes.json<{ destination: { id: string } }>();
+
+    const res = await SELF.fetch(
+      "https://example.com/api/admin/test-send",
+      authed({
+        method: "POST",
+        body: JSON.stringify({
+          destinationId: created.destination.id,
+          record: {
+            SourceIP: "203.0.113.5",
+            Action: "block",
+            BlockedFileHash: "d41d8cd98f00b204e9800998ecf8427e",
+            BlockedFileName: "invoice.exe",
+            BlockedFileReason: "malware detected",
+            DownloadMatchedDlpProfiles: ["PCI-DSS"],
+          },
+        }),
+      }),
+    );
+    const body = await res.json<{ message: string }>();
+
+    expect(body.message).toContain("fileHash=d41d8cd98f00b204e9800998ecf8427e");
+    expect(body.message).toContain("reason=malware detected");
+    expect(body.message).toContain('cs8=["PCI-DSS"] cs8Label=dlpDownloadProfiles');
+  });
 });

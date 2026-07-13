@@ -20,6 +20,27 @@ export function escapeCefExtension(value: unknown): string {
 }
 
 /**
+ * Convert a mapped field's raw value to a string suitable for a CEF
+ * extension, before escaping. Logpush datasets include many array
+ * (`SecurityActions`, `BotTags`, `MatchedCategoryNames`, ...) and object
+ * (`Metadata`, `NewValue`, `OldValue`, ...) fields — naive `String()`
+ * coercion on an object produces the useless literal "[object Object]"
+ * (and is ambiguous for arrays containing commas), so those are
+ * JSON-encoded instead. Primitives (string/number/boolean) pass through
+ * unchanged, matching prior behavior.
+ */
+function stringifyFieldValue(value: unknown): unknown {
+  if (value !== null && typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return value;
+}
+
+/**
  * Best-effort conversion of a Logpush timestamp field to epoch milliseconds.
  * Logpush timestamps may be unixnano (default), unix seconds, or an
  * RFC3339 string, depending on how the job's output_options are configured.
@@ -167,6 +188,38 @@ export interface BuildCefMessageOptions {
   format?: "rfc3164" | "rfc5424";
   /** Syslog facility (0-23). Defaults to 16 (local0). */
   facility?: number;
+  /**
+   * Append a `raw=<JSON of the full record>` extension after the mapped
+   * fields. Defaults to true. This is what guarantees SOC/SIEM visibility
+   * into every field Cloudflare emits for a dataset — including fields
+   * added after this mapping was written — without hand-mapping all of
+   * them to named CEF keys (CEF only has 15 cs + 3 cn slots). Set to false
+   * only if a destination's downstream collector rejects long lines.
+   */
+  includeRaw?: boolean;
+}
+
+/**
+ * Maximum length (characters) of the JSON-encoded `raw` extension value.
+ * Keeps pathological records (e.g. Subrequests arrays, large Metadata
+ * objects) from producing unbounded syslog lines. Most TCP syslog
+ * collectors and SIEMs comfortably handle multi-KB lines; 8 KB is a
+ * conservative ceiling that still fits the vast majority of Logpush
+ * records whole.
+ */
+const RAW_MAX_LENGTH = 8192;
+const RAW_TRUNCATION_SUFFIX = "...<truncated>";
+
+/** JSON-encode the full record for the `raw=` extension, truncating if oversized. */
+function buildRawJson(record: LogpushRecord): string {
+  let json: string;
+  try {
+    json = JSON.stringify(record);
+  } catch {
+    return "<unserializable record>";
+  }
+  if (json.length <= RAW_MAX_LENGTH) return json;
+  return `${json.slice(0, RAW_MAX_LENGTH - RAW_TRUNCATION_SUFFIX.length)}${RAW_TRUNCATION_SUFFIX}`;
 }
 
 /**
@@ -179,7 +232,15 @@ export interface BuildCefMessageOptions {
  *    receiver can bucket events without parsing the CEF body.)
  */
 export function buildCefMessage(opts: BuildCefMessageOptions): string {
-  const { dataset, record, rules, syslogHostname, format = "rfc3164", facility = 16 } = opts;
+  const {
+    dataset,
+    record,
+    rules,
+    syslogHostname,
+    format = "rfc3164",
+    facility = 16,
+    includeRaw = true,
+  } = opts;
   const eventEpochMs = resolveEventEpochMs(record);
   const severity = resolveSeverity(record);
   const pri = syslogPri(severity.syslog, facility);
@@ -203,12 +264,22 @@ export function buildCefMessage(opts: BuildCefMessageOptions): string {
   extensionParts.push(`cat=${escapeCefExtension(dataset)}`);
 
   for (const rule of rules) {
-    const raw = rule.staticValue ?? (rule.sourceField ? record[rule.sourceField] : undefined);
-    if (raw === undefined || raw === null || raw === "") continue;
-    extensionParts.push(`${rule.cefKey}=${escapeCefExtension(raw)}`);
+    const value = rule.staticValue ?? (rule.sourceField ? record[rule.sourceField] : undefined);
+    if (value === undefined || value === null || value === "") continue;
+    // Skip empty arrays/objects too — e.g. an empty MatchedCategoryNames
+    // array on a clean request shouldn't emit `cs6= cs6Label=...`.
+    if (Array.isArray(value) && value.length === 0) continue;
+    extensionParts.push(`${rule.cefKey}=${escapeCefExtension(stringifyFieldValue(value))}`);
     if (rule.label) {
       extensionParts.push(`${rule.cefKey}Label=${escapeCefExtension(rule.label)}`);
     }
+  }
+
+  // Guarantees every field Cloudflare sends is present in the syslog line —
+  // including fields this mapping doesn't name individually and any new
+  // fields Cloudflare adds to the dataset in the future. See `includeRaw`.
+  if (includeRaw && record && Object.keys(record).length > 0) {
+    extensionParts.push(`raw=${escapeCefExtension(buildRawJson(record))}`);
   }
 
   const cefBody = `${cefHeader}|${extensionParts.join(" ")}`;

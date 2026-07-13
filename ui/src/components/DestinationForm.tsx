@@ -50,6 +50,7 @@ export function DestinationForm({
     format: initial?.format ?? "rfc3164",
     facility: initial?.facility ?? 16,
     tls: initial?.tls ?? false,
+    includeRaw: initial?.includeRaw ?? true,
     dataset: initial?.dataset ?? "http_requests",
     mappingId: initial?.mappingId ?? mappings[0]?.id ?? null,
     syslogHostname: initial?.syslogHostname ?? "cloudflare",
@@ -157,6 +158,18 @@ export function DestinationForm({
           {form.transport === "vpc"
             ? "Not supported over Workers VPC (plaintext-only)"
             : "Wrap the TCP connection in TLS"}
+        </label>
+      </Field>
+      <Field label="Include raw JSON">
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input
+            type="checkbox"
+            className="h-5 w-5"
+            checked={form.includeRaw}
+            onChange={(e) => setForm({ ...form, includeRaw: e.target.checked })}
+          />
+          Append raw=&lt;full record JSON&gt; (recommended — guarantees every
+          field reaches the SOC/SIEM, not just the mapped ones)
         </label>
       </Field>
       <Field label="Dataset">

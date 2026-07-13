@@ -18,6 +18,7 @@ interface DestinationRow {
   format: string;
   facility: number;
   tls: number;
+  include_raw: number;
   dataset: string;
   mapping_id: string | null;
   syslog_hostname: string;
@@ -56,6 +57,7 @@ function rowToDestination(row: DestinationRow): Destination {
     format: row.format === "rfc5424" ? "rfc5424" : "rfc3164",
     facility: row.facility,
     tls: row.tls === 1,
+    includeRaw: row.include_raw === 1,
     dataset: row.dataset,
     mappingId: row.mapping_id,
     syslogHostname: row.syslog_hostname,
@@ -132,8 +134,8 @@ export async function createDestination(
   await db
     .prepare(
       `INSERT INTO destinations
-        (id, name, host, port, protocol, transport, frame, format, facility, tls, dataset, mapping_id, syslog_hostname, enabled)
-       VALUES (?1, ?2, ?3, ?4, 'tcp', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
+        (id, name, host, port, protocol, transport, frame, format, facility, tls, include_raw, dataset, mapping_id, syslog_hostname, enabled)
+       VALUES (?1, ?2, ?3, ?4, 'tcp', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`,
     )
     .bind(
       id,
@@ -145,6 +147,7 @@ export async function createDestination(
       input.format,
       input.facility,
       input.tls ? 1 : 0,
+      input.includeRaw ? 1 : 0,
       input.dataset,
       input.mappingId,
       input.syslogHostname,
@@ -169,8 +172,8 @@ export async function updateDestination(
     .prepare(
       `UPDATE destinations SET
         name = ?2, host = ?3, port = ?4, transport = ?5, frame = ?6,
-        format = ?7, facility = ?8, tls = ?9,
-        dataset = ?10, mapping_id = ?11, syslog_hostname = ?12, enabled = ?13,
+        format = ?7, facility = ?8, tls = ?9, include_raw = ?10,
+        dataset = ?11, mapping_id = ?12, syslog_hostname = ?13, enabled = ?14,
         updated_at = datetime('now')
        WHERE id = ?1`,
     )
@@ -184,6 +187,7 @@ export async function updateDestination(
       input.format,
       input.facility,
       input.tls ? 1 : 0,
+      input.includeRaw ? 1 : 0,
       input.dataset,
       input.mappingId,
       input.syslogHostname,

@@ -11,7 +11,11 @@ serves a small web UI for managing where they go.
 - **One-click deploy** — a single Worker, one URL, no infrastructure to manage
 - **9 Logpush datasets supported out of the box** — HTTP requests, Firewall
   events, DNS logs, Spectrum events, and 5 Zero Trust/account datasets — each
-  with a ready-made CEF field mapping (see the [table below](#supported-datasets))
+  with a ready-made CEF field mapping curated for SOC monitoring (see the
+  [table below](#supported-datasets) and [SOC_USE_CASES.md](SOC_USE_CASES.md))
+- **Nothing ever silently dropped** — every message carries a `raw=<full
+  record JSON>` extension alongside the mapped fields, so future Cloudflare
+  fields and anything not in a named CEF key still reach your SIEM
 - **Two syslog header formats** — classic RFC 3164 or structured RFC 5424,
   your choice per destination
 - **Plaintext or TLS** — encrypt the TCP connection (RFC 5425) for
@@ -94,7 +98,7 @@ mapping](#4-customize-field-mappings-optional) for it in about two minutes.
 
 ## Syslog output format
 
-Every destination controls four independent settings — mix and match per
+Every destination controls five independent settings — mix and match per
 receiver:
 
 | Setting | Options | Notes |
@@ -103,6 +107,7 @@ receiver:
 | **Facility** | `0`–`23` (default `16`, local0) | Combined with the per-event severity to compute `PRI`. Most SIEMs don't care; some route by facility. |
 | **Framing** | `rfc6587` (default) or `newline` | See [below](#framing-which-one-do-i-pick). |
 | **TLS** | off (default) or on | RFC 5425 — wraps the TCP connection in TLS. **`Direct` transport only** — Workers VPC connections are plaintext-only, so TLS is rejected up front if you combine it with `Workers VPC`. |
+| **Include raw JSON** | on (default) or off | Appends a `raw=<full Logpush record as JSON>` CEF extension. This is what guarantees every field a dataset emits — including ones not in the default mapping, and any Cloudflare adds later — reaches your SOC/SIEM. Turn off only if your collector enforces a max line length; see [SOC_USE_CASES.md](SOC_USE_CASES.md). |
 
 ### Framing: which one do I pick?
 
@@ -128,6 +133,7 @@ In the web UI, go to **Destinations → + Add destination**:
 | Syslog format | `RFC 3164` is the safe default — see [above](#syslog-output-format) |
 | Facility | `16` (local0) unless your receiver routes by facility |
 | TLS | Off unless your receiver terminates TLS on that port, and transport is `Direct` |
+| Include raw JSON | On (default) — see [Syslog output format](#syslog-output-format) |
 | Dataset | Which Logpush dataset to receive — any of the [9 supported](#supported-datasets), or `all` |
 | CEF mapping | The matching default mapping, or your own |
 
@@ -152,10 +158,13 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/logpush/jobs" 
     "dataset": "http_requests",
     "output_options": {
       "field_names": [
-        "RayID","EdgeStartTimestamp","ClientIP","ClientCountry","ClientSrcPort",
-        "ClientRequestMethod","ClientRequestHost","ClientRequestURI","ClientRequestProtocol",
-        "ClientRequestUserAgent","ClientSSLProtocol","EdgeResponseStatus","EdgeResponseBytes",
-        "EdgeColoCode","EdgeTimeToFirstByteMs","CacheCacheStatus","WAFAction","WAFRuleID","ZoneName"
+        "RayID","EdgeStartTimestamp","ClientIP","ClientASN","ClientIPClass","ClientCountry",
+        "ClientSrcPort","ClientRequestMethod","ClientRequestHost","ClientRequestURI",
+        "ClientRequestProtocol","ClientRequestUserAgent","ClientSSLProtocol","OriginIP",
+        "EdgeResponseStatus","EdgeColoCode","EdgeTimeToFirstByteMs","EdgePathingSrc",
+        "CacheCacheStatus","ZoneName","SecurityAction","SecurityRuleID","SecurityRuleDescription",
+        "SecurityActions","SecurityRuleIDs","SecuritySources","BotScore","BotScoreSrc","BotTags",
+        "JA3Hash","JA4","WAFAttackScore","LeakedCredentialCheckResult"
       ],
       "timestamp_format": "unixnano"
     },
@@ -164,16 +173,22 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/logpush/jobs" 
 ```
 
 A response with `"success": true` means it's live — logs should start
-arriving within a minute or two. For `firewall_events`, use `"dataset":
+arriving within a minute or two. This field list is intentionally broader
+than the SOC-priority CEF mapping table below covers (see
+[SOC_USE_CASES.md](SOC_USE_CASES.md)) — `WAFAction`/`WAFRuleID` are
+Cloudflare's deprecated names for `SecurityAction`/`SecurityRuleID`; don't
+use them in new jobs. For `firewall_events`, use `"dataset":
 "firewall_events"`, `/api/ingest/firewall_events`, and this `field_names` list:
 
 ```json
 "output_options": {
   "field_names": [
-    "RayID","Datetime","ClientIP","ClientCountry","ClientRequestHost",
-    "ClientRequestPath","ClientRequestMethod","ClientRequestUserAgent",
-    "ClientRequestQuery","EdgeColoCode","EdgeResponseStatus","ZoneName",
-    "Action","RuleID","Source"
+    "RayID","Datetime","ClientIP","ClientASN","ClientASNDescription","ClientIPClass",
+    "ClientCountry","ClientRequestHost","ClientRequestPath","ClientRequestMethod",
+    "ClientRequestUserAgent","ClientRequestQuery","EdgeColoCode","EdgeResponseStatus",
+    "OriginResponseStatus","ZoneName","Action","RuleID","Description","Ref","Source",
+    "MatchIndex","LeakedCredentialCheckResult","AISecurityInjectionScore",
+    "OriginatorRayID","FraudUserID"
   ],
   "timestamp_format": "unixnano"
 }
@@ -189,6 +204,13 @@ the **Mappings** tab of the web UI: it always shows the exact
 button), so it can never drift out of sync with the mapping actually in use.
 Remember account-scoped datasets need `/accounts/$ACCOUNT_ID/logpush/jobs`
 instead of `/zones/$ZONE_ID/logpush/jobs` — see the [dataset table](#supported-datasets).
+
+> 💡 **SOC team?** Every field above (and every field in every other
+> dataset's mapping) was chosen to cover six monitoring priorities: bot
+> detection, WAF tuning, DDoS, credential-leak detection, insider threat,
+> and 0-day/threat-intel hunting. See
+> [SOC_USE_CASES.md](SOC_USE_CASES.md) for the full field-to-detection-scenario
+> reference, including example detection logic for each.
 
 > ⚠️ **Common mistake:** `header_Authorization` must be exactly
 > `Bearer%20<INGEST_SECRET>` — the word `Bearer`, a URL-encoded space
@@ -446,7 +468,7 @@ npm run dev:ui        # http://localhost:5173
 
 ```bash
 npm run typecheck
-npm test              # builds the UI, then ~80 tests
+npm test              # builds the UI, then ~97 tests
 ```
 
 ---
@@ -468,6 +490,8 @@ npm test              # builds the UI, then ~80 tests
 | **Test send** reports `{"ok":true}` and echoes a `remoteAddress`, but **nothing arrives** at your syslog server | `ok:true` means the TCP handshake completed and the bytes were written to that peer — check the echoed `remoteAddress` is actually your server. If it is, the bytes reached it, so the gap is on the receiver: confirm the daemon is listening on **TCP** (not UDP) on that port (`ss -tlnp \| grep <port>`), and that its framing expectation matches the destination's [Framing](#framing-which-one-do-i-pick) setting (rsyslog's `imtcp` wants newline-delimited by default; octet-counting needs `SupportOctetCountedFraming`). Also double check the receiver's config filters on `$rawmsg`, not `$msg` — see the [disposable syslog server section](#dont-have-a-syslog-server-yet-spin-up-a-disposable-one-on-debian) for why. |
 | **Test send** fails fast (<1s) with `proxy request failed, cannot connect to the specified address` | The destination host resolves to a **Cloudflare IP** and [outbound TCP to Cloudflare IP ranges is blocked](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/#considerations). Run `dig +short <host>` — if it returns a Cloudflare anycast address (e.g. `104.16.0.0/12`), that hostname is **proxied** (orange cloud), not your origin. Fix: switch the DNS record to **DNS only** (grey cloud) so it resolves to your real origin, or set the destination to the raw origin IP. (If the error additionally says *"consider using fetch instead"*, you pointed it at an HTTP port like 80/443 — use a real syslog TCP port such as 514.) |
 | **Test send** for a dataset other than `http_requests`/`firewall_events` shows mostly-empty CEF extensions | Shouldn't happen — every one of the [9 supported datasets](#supported-datasets) has a matching built-in sample record used by **Test send**. If you're passing a custom `record` in the API request body instead of relying on the built-in sample, make sure its field names match the mapping's `sourceField`s exactly (case-sensitive). |
+| My syslog receiver rejects lines as too long, or truncates them | Turn off **Include raw JSON** on that destination (see [Syslog output format](#syslog-output-format)) — the mapped CEF fields alone are much shorter. The `raw=` extension is capped at 8 KB and self-truncates with a `...<truncated>` marker for pathological records (e.g. `http_requests`' `Subrequests` array), but some collectors have stricter line-length limits than that. |
+| A mapped field that's a JSON array or object (e.g. `SecurityActions`, `Metadata`, `NewValue`) shows up as `[object Object]` | This was a bug in this Worker (fixed): array/object-valued Logpush fields are now JSON-encoded before being written into the CEF extension. If you're on an older build, redeploy from `main`. |
 | Web UI shows "Unauthorized" | Your `ADMIN_SECRET` doesn't match what's deployed. Click **Disconnect** and re-enter it. |
 
 > **Heads up:** Cloudflare's destination validation sends one real POST with
@@ -480,9 +504,14 @@ npm test              # builds the UI, then ~80 tests
 
 ## Roadmap
 
-**Recently shipped:** TLS for `Direct` destinations (RFC 5425) · RFC 5424
-syslog format · configurable syslog facility · 7 additional default
-dataset mappings (`dns_logs`, `spectrum_events`, `gateway_http`,
+**Recently shipped:** SOC-focused field expansion across all 9 default
+mappings covering bot detection, WAF tuning, DDoS, credential-leak
+detection, insider threat, and 0-day/threat-intel hunting (see
+[SOC_USE_CASES.md](SOC_USE_CASES.md)) · a `raw=<full record JSON>` CEF
+extension so no field is ever silently dropped, on by default and
+configurable per destination · TLS for `Direct` destinations (RFC 5425) ·
+RFC 5424 syslog format · configurable syslog facility · 7 additional
+default dataset mappings (`dns_logs`, `spectrum_events`, `gateway_http`,
 `gateway_dns`, `gateway_network`, `audit_logs`, `nel_reports`).
 
 - [ ] UDP delivery via an optional relay

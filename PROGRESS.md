@@ -95,6 +95,50 @@ destinations, with a web UI for managing destinations and field mappings.
   - Deleted the now-redundant `logpush-syslog-hub-web` Worker (confirmed
     user decision) — verified it now 404s and the merged Worker is
     unaffected.
+- [x] 13. RFC 5424 syslog format, TLS (RFC 5425) for `Direct` destinations,
+  configurable syslog facility, and 7 additional default dataset mappings
+  (`dns_logs`, `spectrum_events`, `gateway_http`, `gateway_dns`,
+  `gateway_network`, `audit_logs`, `nel_reports`) — 9 datasets total.
+- [x] 14. SOC field-coverage expansion (user request: "make sure the log
+  field especially Security and HTTP requests logs field all of them are
+  present ... create their own use cases"), scoped to six priorities: bot
+  detection, WAF tuning, DDoS, credential-leak detection, insider threat,
+  0-day/threat-intel hunting:
+  - Audited every field Cloudflare's Logpush docs list for the 9 supported
+    datasets against what was mapped; found major gaps (deprecated
+    `WAFAction`/`WAFRuleID` still in use instead of `SecurityAction`/
+    `SecurityRuleID`; no bot/DLP/threat-intel/fingerprint fields at all).
+  - Added a `raw=<full record JSON>` CEF extension, on by default
+    (per-destination `includeRaw` toggle) — guarantees every field a
+    dataset emits reaches the SOC, including fields not in any mapping and
+    fields Cloudflare adds in the future. Capped at 8 KB with a truncation
+    marker for pathological records.
+  - Found + fixed a real bug while building this: array/object-valued
+    Logpush fields (e.g. `SecurityActions`, `Metadata`, `NewValue`) were
+    rendering as the literal string `[object Object]` via naive `String()`
+    coercion — added `stringifyFieldValue()` to JSON-encode them instead.
+  - Rewrote `DEFAULT_MAPPING_RULES` for all 9 datasets with SOC-priority
+    fields (BotScore/BotTags/JA3Hash/JA4, SecurityActions/RuleIDs/Sources,
+    ClientASN/IPClass, LeakedCredentialCheckResult, WAFAttackScore,
+    BlockedFile*/DLP profiles, MatchedIndicatorFeedNames, audit_logs'
+    OldValue/NewValue diff, etc.) — verified field names against
+    Cloudflare's live docs per dataset, not guessed.
+  - New `SOC_USE_CASES.md`: field-to-detection-scenario reference for all
+    six priorities, SIEM-agnostic generic query logic, verified factual
+    claims (WAF/AI Security score directionality) against Cloudflare docs
+    before publishing.
+  - Migration `0004_soc_field_expansion.sql`: `include_raw` column +
+    updated seeded mappings, generated programmatically from
+    `cef-defaults.ts` (not hand-transcribed) to guarantee they can't drift.
+  - 17 new tests (80 → 97): raw-passthrough behavior (default on/off,
+    truncation, escaping), per-dataset SOC-field mapping assertions, and
+    live test-send integration checks for the priority fields.
+  - Applied migration to the live D1 database, deployed, and verified live
+    against the real production VPC destination: SecurityAction/BotScore/
+    WAFAttackScore/JA3Hash/JA4/LeakedCredentialCheckResult all populated
+    correctly in the delivered CEF message; `audit_logs`' OldValue/NewValue
+    JSON objects confirmed correctly encoded (not `[object Object]`) via a
+    temporary destination, then cleaned up.
 
 ## Notes / Decisions
 
