@@ -47,6 +47,20 @@ four commands.
 
 ---
 
+## The whole path, end to end
+
+Three steps. Each links to its section below.
+
+1. **Deploy the Worker** — [Quick start](#quick-start-5-minutes) (button) or [Manual setup](#manual-setup) (CLI).
+2. **Add a destination** — in the web UI, tell it *where* to send logs (your syslog server's host/port) and *what* format. Then click **Test send** to prove the connection end-to-end before any real logs flow. → [Set up a destination](#1-set-up-a-destination)
+3. **Create a Logpush job** — point Cloudflare Logpush at the Worker so real logs start flowing. → [Point a Logpush job at it](#2-point-a-logpush-job-at-it)
+
+> **No syslog server to test against?** Step 2 needs somewhere to send to.
+> Run [`scripts/setup-test-syslog.sh`](#dont-have-a-syslog-server-yet-one-command-test-receiver)
+> on any Linux box to get a working CEF-over-TCP receiver in one command.
+
+---
+
 ## How it works
 
 ```
@@ -127,7 +141,7 @@ In the web UI, go to **Destinations → + Add destination**:
 | Field | What to enter |
 |---|---|
 | Name | A friendly label, e.g. `Production SIEM` |
-| Host / Port | Your syslog server's address, e.g. `10.0.0.5` / `514`. Don't have one yet? [Spin up a disposable one on Debian](#dont-have-a-syslog-server-yet-spin-up-a-disposable-one-on-debian) in under a minute. |
+| Host / Port | Your syslog server's address, e.g. `10.0.0.5` / `514`. Don't have one yet? [Spin one up with one command](#dont-have-a-syslog-server-yet-one-command-test-receiver). |
 | Transport | `Direct` for a public IP, `Workers VPC` for a private one — see [below](#connecting-to-a-private-syslog-server) |
 | Framing | `newline` is the safe default — see [Framing](#framing-which-one-do-i-pick) |
 | Syslog format | `RFC 3164` is the safe default — see [above](#syslog-output-format) |
@@ -173,12 +187,39 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/logpush/jobs" 
 ```
 
 A response with `"success": true` means it's live — logs should start
-arriving within a minute or two. This field list is intentionally broader
-than the SOC-priority CEF mapping table below covers (see
-[SOC_USE_CASES.md](SOC_USE_CASES.md)) — `WAFAction`/`WAFRuleID` are
-Cloudflare's deprecated names for `SecurityAction`/`SecurityRuleID`; don't
-use them in new jobs. For `firewall_events`, use `"dataset":
-"firewall_events"`, `/api/ingest/firewall_events`, and this `field_names` list:
+arriving within a minute or two.
+
+> ⚠️ **Two things to get right, or the job silently misbehaves:**
+> 1. **`header_Authorization` must be exactly `Bearer%20<INGEST_SECRET>`** —
+>    the word `Bearer`, a URL-encoded space (`%20`), then your secret. Get
+>    this wrong and the job fails to create.
+> 2. **`field_names` must match your CEF mapping.** Logpush has no "send all
+>    fields" option — whatever you omit arrives as `null`, and the Worker's
+>    default mappings reference specific field names. The **Mappings** tab
+>    shows the exact list each mapping needs (with a **Copy JSON** button),
+>    so it can't drift out of sync.
+
+> 💡 **SOC team?** Every field in every dataset's mapping was chosen to cover
+> six monitoring priorities: bot detection, WAF tuning, DDoS, credential-leak
+> detection, insider threat, and 0-day/threat-intel hunting. See
+> [SOC_USE_CASES.md](SOC_USE_CASES.md) for the full
+> field-to-detection-scenario reference. (The field list above intentionally
+> includes `SecurityAction`/`SecurityRuleID` — the current names for the
+> deprecated `WAFAction`/`WAFRuleID`; don't use the old names in new jobs.)
+
+<details>
+<summary><b>The other 8 datasets (firewall_events, dns_logs, gateway_*, …)</b></summary>
+
+The pattern is identical — swap the `dataset`, the `/api/ingest/<dataset>`
+path, and the `field_names` list. **Don't copy field lists from here;** open
+the dataset's default mapping in the **Mappings** tab and use its **Copy
+JSON** button, so the list can never drift from the mapping actually in use.
+
+Account-scoped datasets (`gateway_*`, `audit_logs`) use
+`/accounts/$ACCOUNT_ID/logpush/jobs` instead of
+`/zones/$ZONE_ID/logpush/jobs` — see the [dataset table](#supported-datasets).
+
+For example, `firewall_events` uses these `output_options`:
 
 ```json
 "output_options": {
@@ -193,37 +234,10 @@ use them in new jobs. For `firewall_events`, use `"dataset":
   "timestamp_format": "unixnano"
 }
 ```
+</details>
 
-**For the other 7 supported datasets** (`dns_logs`, `spectrum_events`,
-`gateway_http`, `gateway_dns`, `gateway_network`, `audit_logs`,
-`nel_reports`), the pattern is identical — just swap the `dataset` and
-`destination_conf` path, and use the matching `field_names` list. Rather
-than copy-pasting from this README, open that dataset's default mapping in
-the **Mappings** tab of the web UI: it always shows the exact
-`output_options.field_names` array the job needs (with a **Copy JSON**
-button), so it can never drift out of sync with the mapping actually in use.
-Remember account-scoped datasets need `/accounts/$ACCOUNT_ID/logpush/jobs`
-instead of `/zones/$ZONE_ID/logpush/jobs` — see the [dataset table](#supported-datasets).
-
-> 💡 **SOC team?** Every field above (and every field in every other
-> dataset's mapping) was chosen to cover six monitoring priorities: bot
-> detection, WAF tuning, DDoS, credential-leak detection, insider threat,
-> and 0-day/threat-intel hunting. See
-> [SOC_USE_CASES.md](SOC_USE_CASES.md) for the full field-to-detection-scenario
-> reference, including example detection logic for each.
-
-> ⚠️ **Common mistake:** `header_Authorization` must be exactly
-> `Bearer%20<INGEST_SECRET>` — the word `Bearer`, a URL-encoded space
-> (`%20`), then your secret. Get this wrong and the job fails to create.
->
-> ⚠️ **`field_names` must match your CEF mapping exactly.** Logpush has no
-> "send all fields" option — whatever you omit from `field_names` arrives
-> as `null` in that record, and this Worker's default CEF mappings
-> (`src/shared/cef-defaults.ts`) reference specific field names. If you're
-> using a custom mapping, the **Mappings** tab always shows the exact
-> `field_names` your mapping needs.
-
-#### Prefer the dashboard? Here's the same job, click by click
+<details>
+<summary><b>Prefer the dashboard? The same job, click by click</b></summary>
 
 1. Cloudflare dashboard → **Logpush** (account or zone level, per the
    [dataset table](#supported-datasets)) → **Create a Logpush job**.
@@ -233,25 +247,22 @@ instead of `/zones/$ZONE_ID/logpush/jobs` — see the [dataset table](#supported
 4. **Dataset** — select the dataset you're forwarding.
 5. **Job name** — anything you like.
 6. **If logs match** — leave as-is unless you want to filter which events get pushed.
-7. **Send the following fields** — this is the dashboard's version of
-   `output_options.field_names`. The dashboard's own default field set is
-   **not** the same list your mapping needs — switch to manual selection and
-   pick exactly the fields shown in the **Mappings** tab, or fields will
-   silently arrive as empty in the CEF output.
-8. **Advanced Options** → **Timestamp format** — `RFC3339` (the dashboard
-   default) is fine; this Worker parses `unixnano`, `unix`, and RFC3339
-   timestamps automatically.
+7. **Send the following fields** — the dashboard's version of
+   `output_options.field_names`. Its default field set is **not** the list
+   your mapping needs — switch to manual selection and pick exactly the
+   fields shown in the **Mappings** tab, or fields arrive empty.
+8. **Advanced Options** → **Timestamp format** — `RFC3339` (the default) is
+   fine; the Worker parses `unixnano`, `unix`, and RFC3339 automatically.
 9. **Submit**.
 
-> ⚠️ **Dashboard-specific gotcha:** the dashboard validates `destination_conf`
-> against the regex `^[a-zA-Z0-9\.,_:/?%+&=\{\}-]+$` — notably, **no literal
-> spaces**. The URL above already encodes its one space as `%20`
-> (three plain characters: `%`, `2`, `0`), which is valid. If you get
-> `invalid destination_conf: config string must match "..."`, something
-> along the way turned that `%20` back into a real space character — paste
-> the URL directly rather than retyping it. If the dashboard keeps mangling
-> it, the [API method](#2-point-a-logpush-job-at-it) above sidesteps this
-> entirely.
+> ⚠️ **Dashboard gotcha:** it validates `destination_conf` against
+> `^[a-zA-Z0-9\.,_:/?%+&=\{\}-]+$` — **no literal spaces**. The URL's one
+> space is already encoded as `%20` (three characters: `%`, `2`, `0`), which
+> is valid. If you get `invalid destination_conf: config string must
+> match "..."`, something turned that `%20` back into a real space — paste
+> the URL directly rather than retyping it. If it keeps mangling it, the
+> [API method](#2-point-a-logpush-job-at-it) above sidesteps this entirely.
+</details>
 
 ### 3. Watch it work
 
@@ -268,129 +279,103 @@ names but accepts any Logpush dataset — then add rows mapping a **cefKey**
 
 ---
 
-## Don't have a syslog server yet? Spin up a disposable one on Debian
+## Don't have a syslog server yet? One-command test receiver
 
-For a quick PoC, this sets up `rsyslog` on a fresh Debian box (or container)
-to listen on TCP and write anything that looks like our CEF output to its
-own file.
+To try this out you need *somewhere* to send logs. The repo ships a script
+that turns any Linux box (or container) into a CEF-over-TCP receiver: it
+installs `rsyslog`, listens on TCP `514`, and writes every CEF line to its
+own logfile. Works on Debian/Ubuntu, Fedora/RHEL, and Alpine, with or
+without systemd.
 
-> **Why the filter matches `$rawmsg`, not `$msg`:** rsyslog's RFC 3164
-> parser treats the leading token up to the first colon as the syslog
-> **tag** — so for a line like `<134>Jul 12 ... CEF:0|Cloudflare|...`, it
-> consumes `CEF:` itself as the tag, and `$msg` no longer contains `CEF:0|`.
-> Matching on `$rawmsg` (the entire unparsed line) avoids this — the
-> template below writes it back out unmodified so the full CEF line is
-> preserved in the log file, byte for byte.
-
-> **Why this version doesn't die when you disconnect:** an earlier version
-> of this script piped straight into an interactive `docker run -it bash`
-> and ended with a blocking `tail -f`. Both are fragile — a container's
-> whole process tree dies the instant its PID 1 exits (an interactive
-> `bash` has no init system to keep other processes alive), and a script
-> that ends by blocking on a live terminal makes any SSH drop or closed
-> pane look like the whole setup failed. The version below runs the setup
-> as a one-shot command against a container whose PID 1 is a stable
-> no-op (`sleep infinity`) — daemonized processes like `rsyslogd` get
-> reparented to it and keep running no matter what happens to your
-> terminal — and watching the logs is a separate, reconnect-anytime step.
-
-**On a real Debian/Ubuntu VM (via SSH),** paste this as whatever user you're
-logged in as (e.g. the default `ubuntu` user) — it elevates itself with
-`sudo` for the privileged parts, so you don't need to `sudo -i` first.
-`rsyslog` runs under systemd, so it's already independent of your SSH
-session once installed:
+**On a fresh Linux VM (via SSH):**
 
 ```bash
-sudo bash <<'ROOTSCRIPT'
-set -euo pipefail
-
-PORT=514  # <1024, needs root to bind — already covered by `sudo bash` above
-LOGFILE=/var/log/logpush-syslog-hub.log
-
-apt-get update -y
-apt-get install -y rsyslog
-
-cat > /etc/rsyslog.d/10-logpush-syslog-hub.conf <<EOF
-module(load="imtcp")
-input(type="imtcp" port="${PORT}")
-
-template(name="rawpassthrough" type="string" string="%rawmsg%\n")
-
-# Anything with our CEF header goes to its own file instead of syslog/messages
-if \$rawmsg contains "CEF:0|" then {
-    action(type="omfile" file="${LOGFILE}" template="rawpassthrough")
-    stop
-}
-EOF
-
-touch "$LOGFILE"
-chmod 640 "$LOGFILE"
-systemctl enable rsyslog
-systemctl restart rsyslog
-
-echo "Done. rsyslog is running under systemd — it'll keep running even if this session disconnects."
-echo "Watch logs any time with: sudo tail -f ${LOGFILE}"
-ROOTSCRIPT
+curl -fsSL https://raw.githubusercontent.com/pongpisit/logpush-syslog-hub/main/scripts/setup-test-syslog.sh | sudo bash
 ```
 
-> `sudo bash <<'ROOTSCRIPT' ... ROOTSCRIPT` runs the whole block as root in
-> one go, so `apt-get`, writing to `/etc/rsyslog.d/`, and `systemctl` all
-> succeed regardless of which user pasted it in. If you skip this and paste
-> the inner body directly as a non-root user instead, you'll hit `Permission
-> denied` writing to `/etc/rsyslog.d/` — `set -e` then aborts the script
-> right there (that's a normal, if abrupt, way for a script to fail; it's
-> not related to disconnects).
-
-**In a throwaway Docker container instead,** start it detached first so it
-survives disconnects, then run setup as a one-shot `exec` — nothing here
-blocks or depends on your terminal staying open:
+**Or clone the repo and run it directly** (it's short and worth a read first):
 
 ```bash
-# 1. A container whose only job is to stay alive (survives any disconnect)
-docker run -d --name logpush-poc -p 514:514 debian:12 sleep infinity
-
-# 2. Install and configure rsyslog inside it — safe to lose your
-#    connection the moment this command returns
-docker exec logpush-poc bash -c '
-set -euo pipefail
-apt-get update -y
-apt-get install -y rsyslog
-cat > /etc/rsyslog.d/10-logpush-syslog-hub.conf <<EOF
-module(load="imtcp")
-input(type="imtcp" port="514")
-template(name="rawpassthrough" type="string" string="%rawmsg%\n")
-if \$rawmsg contains "CEF:0|" then {
-    action(type="omfile" file="/var/log/logpush-syslog-hub.log" template="rawpassthrough")
-    stop
-}
-EOF
-touch /var/log/logpush-syslog-hub.log
-rsyslogd
-echo "rsyslogd is running, reparented to this container'"'"'s PID 1 — it will survive even if this exec session disconnects."
-'
-
-# 3. Watch logs any time — reconnect and rerun this as often as you like
-docker exec -it logpush-poc tail -f /var/log/logpush-syslog-hub.log
+sudo ./scripts/setup-test-syslog.sh
+# custom port (>=1024 needs no root to bind):  sudo PORT=1514 ./scripts/setup-test-syslog.sh
 ```
 
-Then, back in the web UI, add a destination pointing at it:
+When it finishes it prints the exact destination settings to enter in the
+web UI. In a second terminal, watch the logs arrive:
+
+```bash
+tail -f /var/log/logpush-syslog-hub.log
+```
+
+Then add a destination pointing at this box and click **Test send** — a CEF
+line should appear in the `tail -f` immediately:
 
 | Field | Value |
 |---|---|
 | Host | This box's IP (`hostname -I`), or `127.0.0.1` if testing against `wrangler dev` locally |
-| Port | `514` |
+| Port | `514` (or whatever `PORT` you set) |
 | Transport | `Direct` |
 | Framing | `newline` (rsyslog's `imtcp` also auto-detects `rfc6587`, so either works) |
 
-Click **Test send** — a CEF line should appear immediately in the `tail -f`
-terminal from the script above.
+> ⚠️ **Reachability:** a **deployed** Worker sends TCP from Cloudflare's
+> network, so the receiver needs a **public** IP with the port open in your
+> **cloud firewall / security group** (not just `ufw`). Testing against
+> `wrangler dev`? Use `127.0.0.1`. Private box with no public IP? Use
+> `Workers VPC` — see [below](#connecting-to-a-private-syslog-server).
 
-> **Reachability matters:** a **deployed** Worker sends TCP from Cloudflare's
-> network, so the receiver needs a **public** IP with the port open (cloud
-> firewall / security group, not just `ufw`). Testing against `wrangler dev`
-> instead? Use `127.0.0.1` — everything runs on your machine. For a private
-> receiver with no public IP, use `Workers VPC` — see
-> [below](#connecting-to-a-private-syslog-server).
+<details>
+<summary><b>Prefer a throwaway Docker container?</b></summary>
+
+Start it detached so it survives disconnects, then run the script inside it
+as a one-shot `exec`:
+
+```bash
+# A container whose only job is to stay alive
+docker run -d --name logpush-poc -p 514:514 debian:12 sleep infinity
+
+# Install + configure rsyslog inside it
+docker exec logpush-poc bash -c \
+  'apt-get update -y && apt-get install -y curl >/dev/null && \
+   curl -fsSL https://raw.githubusercontent.com/pongpisit/logpush-syslog-hub/main/scripts/setup-test-syslog.sh | bash'
+
+# Watch logs any time — reconnect and rerun this as often as you like
+docker exec -it logpush-poc tail -f /var/log/logpush-syslog-hub.log
+```
+
+Point the destination's **Host** at the Docker host's IP (the `-p 514:514`
+publishes it), or `127.0.0.1` when testing locally.
+</details>
+
+<details>
+<summary><b>How the script works, and the two non-obvious gotchas it handles</b></summary>
+
+The whole receiver config is just this — an `imtcp` listener plus a rule
+that routes CEF lines to their own file:
+
+```
+module(load="imtcp")
+input(type="imtcp" port="514")
+template(name="rawpassthrough" type="string" string="%rawmsg%\n")
+if $rawmsg contains "CEF:0|" then {
+    action(type="omfile" file="/var/log/logpush-syslog-hub.log" template="rawpassthrough")
+    stop
+}
+```
+
+- **Why the filter matches `$rawmsg`, not `$msg`:** rsyslog's RFC 3164
+  parser treats the leading token up to the first colon as the syslog
+  **tag** — so for `<134>Jul 12 ... CEF:0|Cloudflare|...` it consumes `CEF:`
+  itself as the tag, and `$msg` no longer contains `CEF:0|`. Matching on
+  `$rawmsg` (the entire unparsed line) avoids this, and the template writes
+  it back out unmodified so the full CEF line is preserved byte-for-byte.
+- **Why it survives an SSH/terminal disconnect:** on a systemd host the
+  script enables + restarts the `rsyslog` service, so it's decoupled from
+  your login shell. In a container (no systemd) it launches `rsyslogd`
+  directly, which reparents to the container's PID 1 and keeps running —
+  which is why the Docker recipe above uses a `sleep infinity` PID 1 and a
+  separate, reconnect-anytime `tail -f` rather than an interactive shell
+  that dies the moment you disconnect.
+</details>
 
 ---
 
@@ -487,7 +472,7 @@ npm test              # builds the UI, then ~97 tests
 | Dashboard rejects the job with `invalid destination_conf: config string must match "^[a-zA-Z0-9\.,_:/?%+&=\{\}-]+$"` | That regex has no literal space in its allowed characters. Your `header_Authorization=Bearer%20<SECRET>` query param must keep `%20` as the three literal characters `%`, `2`, `0` — if it got turned back into a real space (e.g. by retyping instead of pasting), this is the error you'll get. Paste the URL directly rather than retyping it; if the dashboard keeps mangling it, use the [API method](#2-point-a-logpush-job-at-it) instead. |
 | Logpush job creation fails with a different/other validation error | Double-check `INGEST_SECRET` matches exactly, including the URL-encoded `Bearer%20` prefix — the ingest endpoint must return `2xx` during Logpush's validation POST. |
 | **Test send** (or real delivery) fails with `Connection to <host>:<port> timed out after 8000ms`, `transport: direct` | Two likely causes, in order of likelihood: (1) the server only listens on **UDP**, not TCP, on that port — Cloudflare Workers can only open outbound **TCP** connections, no raw UDP support; (2) an IP-based firewall/security group is dropping the connection. For (2): unlike `fetch()`, Workers' TCP `connect()` egress is **not** sourced from Cloudflare's published IP ranges, so there's no fixed list you can allowlist. If the same host:port is reachable via `nc -zv <host> <port>` from an unrelated machine but times out here, an IP allowlist is almost certainly why — switch that destination to `Workers VPC` instead, which authenticates via the tunnel rather than source IP. |
-| **Test send** reports `{"ok":true}` and echoes a `remoteAddress`, but **nothing arrives** at your syslog server | `ok:true` means the TCP handshake completed and the bytes were written to that peer — check the echoed `remoteAddress` is actually your server. If it is, the bytes reached it, so the gap is on the receiver: confirm the daemon is listening on **TCP** (not UDP) on that port (`ss -tlnp \| grep <port>`), and that its framing expectation matches the destination's [Framing](#framing-which-one-do-i-pick) setting (rsyslog's `imtcp` wants newline-delimited by default; octet-counting needs `SupportOctetCountedFraming`). Also double check the receiver's config filters on `$rawmsg`, not `$msg` — see the [disposable syslog server section](#dont-have-a-syslog-server-yet-spin-up-a-disposable-one-on-debian) for why. |
+| **Test send** reports `{"ok":true}` and echoes a `remoteAddress`, but **nothing arrives** at your syslog server | `ok:true` means the TCP handshake completed and the bytes were written to that peer — check the echoed `remoteAddress` is actually your server. If it is, the bytes reached it, so the gap is on the receiver: confirm the daemon is listening on **TCP** (not UDP) on that port (`ss -tlnp \| grep <port>`), and that its framing expectation matches the destination's [Framing](#framing-which-one-do-i-pick) setting (rsyslog's `imtcp` wants newline-delimited by default; octet-counting needs `SupportOctetCountedFraming`). Also double check the receiver's config filters on `$rawmsg`, not `$msg` — see the [test receiver section](#dont-have-a-syslog-server-yet-one-command-test-receiver) for why. |
 | **Test send** fails fast (<1s) with `proxy request failed, cannot connect to the specified address` | The destination host resolves to a **Cloudflare IP** and [outbound TCP to Cloudflare IP ranges is blocked](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/#considerations). Run `dig +short <host>` — if it returns a Cloudflare anycast address (e.g. `104.16.0.0/12`), that hostname is **proxied** (orange cloud), not your origin. Fix: switch the DNS record to **DNS only** (grey cloud) so it resolves to your real origin, or set the destination to the raw origin IP. (If the error additionally says *"consider using fetch instead"*, you pointed it at an HTTP port like 80/443 — use a real syslog TCP port such as 514.) |
 | **Test send** for a dataset other than `http_requests`/`firewall_events` shows mostly-empty CEF extensions | Shouldn't happen — every one of the [9 supported datasets](#supported-datasets) has a matching built-in sample record used by **Test send**. If you're passing a custom `record` in the API request body instead of relying on the built-in sample, make sure its field names match the mapping's `sourceField`s exactly (case-sensitive). |
 | My syslog receiver rejects lines as too long, or truncates them | Turn off **Include raw JSON** on that destination (see [Syslog output format](#syslog-output-format)) — the mapped CEF fields alone are much shorter. The `raw=` extension is capped at 8 KB and self-truncates with a `...<truncated>` marker for pathological records (e.g. `http_requests`' `Subrequests` array), but some collectors have stricter line-length limits than that. |

@@ -139,6 +139,27 @@ destinations, with a web UI for managing destinations and field mappings.
     correctly in the delivered CEF message; `audit_logs`' OldValue/NewValue
     JSON objects confirmed correctly encoded (not `[object Object]`) via a
     temporary destination, then cleaned up.
+- [x] 15. README readability pass + test-receiver script (user request:
+  "make it easy to understand and easy to follow step by step and have a
+  sample script to setup linux syslog server for testing"):
+  - New `scripts/setup-test-syslog.sh`: one-command CEF-over-TCP test
+    receiver. Installs rsyslog via apt/dnf/yum/apk, writes the `$rawmsg`
+    filter config, starts under systemd *or* bare `rsyslogd` (containers),
+    confirms the TCP listener, and prints the exact web-UI destination
+    settings. Configurable `PORT`/`LOGFILE`, root-guarded, idempotent.
+  - Verified the script end-to-end in a real Linux container: installed
+    rsyslog, confirmed it listened on TCP 514, sent a real RFC 3164 CEF
+    line over the socket, and confirmed it was written to the dedicated
+    logfile byte-for-byte and did **not** leak into `/var/log/messages`.
+    Caught + fixed a bug during testing (wrote the drop-in config before
+    `mkdir -p /etc/rsyslog.d`).
+  - README restructured for step-by-step readability: added a "The whole
+    path, end to end" 3-step overview up top; replaced the two large inline
+    setup heredocs with the script + a one-liner; moved the hard-won "why"
+    caveats (`$rawmsg` vs `$msg`, disconnect survival), the Docker recipe,
+    the dashboard walkthrough, and the other-datasets field lists into
+    collapsible `<details>` blocks so the happy path stays short. Verified
+    all 27 in-page anchor links still resolve.
 
 ## Notes / Decisions
 
