@@ -1,5 +1,9 @@
 # logpush-syslog-hub
 
+[![CI](https://github.com/pongpisit/logpush-syslog-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/pongpisit/logpush-syslog-hub/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
+
 Forward **Cloudflare Logpush** logs to any syslog server or SIEM as
 standard **CEF over TCP** — Splunk, QRadar, Elastic, Graylog, rsyslog,
 syslog-ng, or anything that listens on a TCP port. No custom parser needed

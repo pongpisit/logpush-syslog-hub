@@ -34,3 +34,39 @@ jobs:
 
       - name: Test
         run: npx vitest run --coverage
+
+  smoke-test-syslog-script:
+    name: Smoke-test setup-test-syslog.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell lint the script
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y shellcheck
+          # -S warning: fail on real problems, ignore cosmetic style/info nits
+          # (which can vary between shellcheck versions on the runner).
+          shellcheck -S warning scripts/setup-test-syslog.sh
+
+      - name: Run the setup script (installs + configures rsyslog on TCP 1514)
+        run: sudo env PORT=1514 bash scripts/setup-test-syslog.sh
+
+      - name: Send a CEF line over TCP and assert it lands in the logfile
+        run: |
+          set -euo pipefail
+          # A realistic RFC 3164 line whose "CEF:" tag would break a naive $msg filter.
+          LINE='<134>Jul 13 03:20:05 cloudflare CEF:0|Cloudflare|Logpush|1.0|http_requests|HTTP Request|0|src=203.0.113.1 act=block'
+          printf '%s\n' "$LINE" | nc -w3 127.0.0.1 1514
+          sleep 2
+          echo '--- /var/log/logpush-syslog-hub.log ---'
+          sudo cat /var/log/logpush-syslog-hub.log
+          echo '----------------------------------------'
+          # The whole line must be preserved byte-for-byte (the $rawmsg passthrough).
+          sudo grep -qF "$LINE" /var/log/logpush-syslog-hub.log
+          echo '✓ CEF line captured intact'
+          # And it must NOT have leaked into the default syslog file (the `stop`).
+          if sudo test -f /var/log/syslog && sudo grep -q 'CEF:0|Cloudflare' /var/log/syslog; then
+            echo '✗ CEF line leaked into /var/log/syslog (stop directive not working)'; exit 1
+          fi
+          echo '✓ Did not leak into /var/log/syslog'
