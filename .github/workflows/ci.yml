@@ -55,18 +55,30 @@ jobs:
       - name: Send a CEF line over TCP and assert it lands in the logfile
         run: |
           set -euo pipefail
+          LOGFILE=/var/log/logpush-syslog-hub.log
           # A realistic RFC 3164 line whose "CEF:" tag would break a naive $msg filter.
           LINE='<134>Jul 13 03:20:05 cloudflare CEF:0|Cloudflare|Logpush|1.0|http_requests|HTTP Request|0|src=203.0.113.1 act=block'
           printf '%s\n' "$LINE" | nc -w3 127.0.0.1 1514
-          sleep 2
-          echo '--- /var/log/logpush-syslog-hub.log ---'
-          sudo cat /var/log/logpush-syslog-hub.log
-          echo '----------------------------------------'
-          # The whole line must be preserved byte-for-byte (the $rawmsg passthrough).
-          sudo grep -qF "$LINE" /var/log/logpush-syslog-hub.log
-          echo '✓ CEF line captured intact'
+
+          # Poll for the line rather than a fixed sleep (rsyslog flush timing varies).
+          for _ in $(seq 1 20); do
+            if sudo grep -qF "$LINE" "$LOGFILE" 2>/dev/null; then break; fi
+            sleep 0.5
+          done
+
+          echo "--- $LOGFILE ---"; sudo cat "$LOGFILE" 2>/dev/null || echo '(empty/missing)'; echo '---'
+
+          if ! sudo grep -qF "$LINE" "$LOGFILE" 2>/dev/null; then
+            echo '::error::CEF line was not captured in the logfile'
+            echo '--- rsyslog status ---';        sudo systemctl status rsyslog --no-pager || true
+            echo '--- ls -l logfile ---';         sudo ls -l "$LOGFILE" || true
+            echo '--- rsyslog journal (tail) ---'; sudo journalctl -u rsyslog --no-pager | tail -30 || true
+            exit 1
+          fi
+          echo '✓ CEF line captured intact (byte-for-byte $rawmsg passthrough)'
+
           # And it must NOT have leaked into the default syslog file (the `stop`).
           if sudo test -f /var/log/syslog && sudo grep -q 'CEF:0|Cloudflare' /var/log/syslog; then
-            echo '✗ CEF line leaked into /var/log/syslog (stop directive not working)'; exit 1
+            echo '::error::CEF line leaked into /var/log/syslog (stop directive not working)'; exit 1
           fi
           echo '✓ Did not leak into /var/log/syslog'

@@ -69,13 +69,22 @@ template(name="rawpassthrough" type="string" string="%rawmsg%\n")
 # Anything carrying a CEF header goes to its own file, then we stop processing
 # so it never also lands in /var/log/syslog.
 if \$rawmsg contains "CEF:0|" then {
-    action(type="omfile" file="${LOGFILE}" template="rawpassthrough")
+    action(type="omfile" file="${LOGFILE}" template="rawpassthrough"
+           fileCreateMode="0644" createDirs="on")
     stop
 }
 EOF
 
+# Pre-create the logfile so `tail -f` works immediately. Crucially, on
+# Debian/Ubuntu rsyslog drops privileges to the `syslog` user, so a
+# root-owned file it can't write to would silently swallow every message.
+# Own it by that user when it exists (elsewhere rsyslog runs as root), and
+# keep it 0644 so the invoking user's `tail -f` can read it.
 touch "$LOGFILE"
-chmod 640 "$LOGFILE"
+chmod 0644 "$LOGFILE"
+if id -u syslog >/dev/null 2>&1; then
+  chown syslog "$LOGFILE" 2>/dev/null || true
+fi
 
 # Some distros' /etc/rsyslog.conf doesn't include the drop-in dir. Make sure ours is loaded.
 if [ -f /etc/rsyslog.conf ] && ! grep -Eq '/etc/rsyslog\.d' /etc/rsyslog.conf; then
