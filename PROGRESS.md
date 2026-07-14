@@ -160,6 +160,19 @@ destinations, with a web UI for managing destinations and field mappings.
     the dashboard walkthrough, and the other-datasets field lists into
     collapsible `<details>` blocks so the happy path stays short. Verified
     all 27 in-page anchor links still resolve.
+- [x] 16. Repo polish: README badges (CI status, MIT license, Cloudflare
+  Workers) + a CI job that regression-tests the script:
+  - New `smoke-test-syslog-script` CI job: shellchecks the script
+    (`-S warning`), runs it on the runner (`PORT=1514`), sends a real
+    RFC 3164 CEF line over TCP, and asserts it's captured byte-for-byte in
+    the dedicated logfile and does **not** leak into `/var/log/syslog`.
+  - That job immediately earned its keep: it caught a real bug — the script
+    pre-created the logfile as `root:root 0640`, but on Debian/Ubuntu
+    rsyslog drops to the `syslog` user and so couldn't write it (listener
+    up, logfile silently empty). Fixed by chowning the pre-created file to
+    `syslog` when that user exists + `fileCreateMode`/`createDirs` on the
+    omfile action. Both CI jobs now green; smoke-test assertions confirmed
+    genuinely passing in the run log (not false-positives).
 
 ## Notes / Decisions
 
